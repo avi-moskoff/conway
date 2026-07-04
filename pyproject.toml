@@ -1,0 +1,13 @@
+[project]
+name = "conway"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "rgbmatrix",
+    "scipy>=1.18.0",
+]
+
+[tool.uv.sources]
+rgbmatrix = { git = "https://github.com/hzeller/rpi-rgb-led-matrix" }
