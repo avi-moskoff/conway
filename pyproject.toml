@@ -5,9 +5,18 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "pillow>=12.3.0",
     "rgbmatrix",
     "scipy>=1.18.0",
 ]
 
+[dependency-groups]
+dev = [
+    "cython>=3.2.8",
+]
+
 [tool.uv.sources]
 rgbmatrix = { git = "https://github.com/hzeller/rpi-rgb-led-matrix" }
+
+[tool.uv.extra-build-dependencies]
+rgbmatrix = ["scikit-build-core", "cmake"]
