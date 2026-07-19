@@ -19,21 +19,16 @@ class BoidsGame(Game):
     @property
     def frame(self) -> np.ndarray:
         frame = np.zeros((self.height, self.width, 3), dtype=np.uint8)
-        speeds = np.linalg.norm(self.velocities, axis=1, keepdims=True)
-        directions = self.velocities / np.maximum(speeds, 0.001)
-
         pixel_bounds = self._bounds.astype(int)
-        tails = np.rint(self.positions - directions * 2).astype(int) % pixel_bounds
         heads = np.rint(self.positions).astype(int) % pixel_bounds
 
-        frame[tails[:, 1], tails[:, 0]] = (24, 64, 96)
-        frame[heads[:, 1], heads[:, 0]] = (160, 240, 255)
+        frame[heads[:, 1], heads[:, 0]] = (255, 255, 255)
         return frame
 
     def reset(self) -> None:
-        self.positions = (
-            np.random.random((self.boid_count, 2)) * self._bounds
-        ).astype(np.float32)
+        self.positions = (np.random.random((self.boid_count, 2)) * self._bounds).astype(
+            np.float32
+        )
         angles = np.random.uniform(0, 2 * np.pi, self.boid_count)
         speeds = np.random.uniform(0.5, 1.25, self.boid_count)
         self.velocities = np.column_stack(
