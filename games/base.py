@@ -6,6 +6,8 @@ import numpy as np
 class Game(ABC):
     """Interface implemented by every game the runner can host."""
 
+    frame_delay_seconds = 1.0
+
     def __init__(self, height: int, width: int) -> None:
         self.height = height
         self.width = width
