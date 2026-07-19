@@ -1,6 +1,6 @@
 from collections.abc import Sequence
-from threading import Lock
-from time import sleep
+from signal import SIGTERM, signal
+from threading import Event, Lock
 
 import numpy as np
 from gpiozero import Button, LED, RotaryEncoder
@@ -17,6 +17,7 @@ class GameRunner:
 
     def __init__(self, games: Sequence[Game] | None = None) -> None:
         self._game_lock = Lock()
+        self._stop_event = Event()
         self._games = (
             list(games)
             if games is not None
@@ -88,15 +89,25 @@ class GameRunner:
                 f"got {game.height}x{game.width}"
             )
 
+    def stop(self, _signal_number: int, _frame: object) -> None:
+        """Request a graceful stop from a process signal handler."""
+        self._stop_event.set()
+
     def run(self) -> None:
+        self._stop_event.clear()
+        previous_sigterm_handler = signal(SIGTERM, self.stop)
         try:
-            while True:
+            while not self._stop_event.is_set():
                 game, frame = self._current_frame()
                 self.display.show(frame)
-                sleep(game.frame_delay_seconds)
+                if self._stop_event.wait(game.frame_delay_seconds):
+                    break
                 self._advance_if_current(game)
         finally:
             try:
-                self.display.turn_off()
+                try:
+                    self.display.turn_off()
+                finally:
+                    self._button_led_red.off()
             finally:
-                self._button_led_red.off()
+                signal(SIGTERM, previous_sigterm_handler)
