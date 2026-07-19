@@ -7,10 +7,26 @@ class BoidsGame(Game):
     """A flocking simulation sized for the LED matrix."""
 
     frame_delay_seconds = 0.05
+    separation_radius = 4
+    alignment_weight = 0.04
+    cohesion_weight = 0.003
+    separation_weight = 0.3
+    minimum_speed = 0.4
+    maximum_speed = 1.5
 
-    def __init__(self, height: int, width: int, boid_count: int = 36) -> None:
+    def __init__(
+        self,
+        height: int,
+        width: int,
+        boid_count: int = 36,
+        flock_count: int = 3,
+    ) -> None:
         super().__init__(height, width)
+        if not 1 <= flock_count <= boid_count:
+            raise ValueError("flock_count must be between 1 and boid_count")
         self.boid_count = boid_count
+        self.flock_count = flock_count
+        self.flock_ids = np.arange(boid_count) % flock_count
         self._bounds = np.array([width, height], dtype=np.float32)
         self.positions = np.empty((boid_count, 2), dtype=np.float32)
         self.velocities = np.empty((boid_count, 2), dtype=np.float32)
@@ -26,11 +42,18 @@ class BoidsGame(Game):
         return frame
 
     def reset(self) -> None:
-        self.positions = (np.random.random((self.boid_count, 2)) * self._bounds).astype(
-            np.float32
+        flock_centers = np.random.random((self.flock_count, 2)) * self._bounds
+        self.positions = (
+            flock_centers[self.flock_ids]
+            + np.random.normal(0, 4, (self.boid_count, 2))
+        ) % self._bounds
+
+        flock_headings = np.random.uniform(0, 2 * np.pi, self.flock_count)
+        angles = flock_headings[self.flock_ids] + np.random.normal(
+            0, 0.25, self.boid_count
         )
-        angles = np.random.uniform(0, 2 * np.pi, self.boid_count)
         speeds = np.random.uniform(0.5, 1.25, self.boid_count)
+        self.positions = self.positions.astype(np.float32)
         self.velocities = np.column_stack(
             (np.cos(angles) * speeds, np.sin(angles) * speeds)
         ).astype(np.float32)
@@ -41,8 +64,9 @@ class BoidsGame(Game):
         distance_squared = np.sum(offsets**2, axis=2)
         not_self = distance_squared > 0
 
-        nearby = not_self & (distance_squared < 9**2)
-        close = not_self & (distance_squared < 3**2)
+        same_flock = self.flock_ids[:, np.newaxis] == self.flock_ids[np.newaxis, :]
+        nearby = not_self & same_flock
+        close = not_self & (distance_squared < self.separation_radius**2)
 
         alignment = self._masked_mean(
             np.broadcast_to(self.velocities, offsets.shape), nearby
@@ -55,9 +79,14 @@ class BoidsGame(Game):
         np.divide(1, distance_squared, out=separation_weights, where=close)
         separation = -np.sum(offsets * separation_weights[:, :, np.newaxis], axis=1)
 
-        self.velocities += alignment * 0.05 + cohesion * 0.008 + separation * 0.2
+        self.velocities += (
+            alignment * self.alignment_weight
+            + cohesion * self.cohesion_weight
+            + separation * self.separation_weight
+        )
         speed = np.linalg.norm(self.velocities, axis=1, keepdims=True)
-        self.velocities *= np.minimum(1, 1.5 / np.maximum(speed, 0.001))
+        target_speed = np.clip(speed, self.minimum_speed, self.maximum_speed)
+        self.velocities *= target_speed / np.maximum(speed, 0.001)
         self.positions = (self.positions + self.velocities) % self._bounds
 
     @staticmethod
