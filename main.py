@@ -1,10 +1,9 @@
 import numpy as np
-import random
 from rgbmatrix import RGBMatrix, RGBMatrixOptions
-import argparse
 from time import sleep
 from scipy.signal import convolve2d
 from PIL import Image
+from gpiozero import LED, Button
 
 
 def get_next_board(board: np.ndarray) -> np.ndarray:
@@ -18,9 +17,6 @@ def get_next_board(board: np.ndarray) -> np.ndarray:
 
 
 def main():
-    # parser = argparse.ArgumentParser()
-    # parser.add_argument('-m', '--multiplex', type=int)
-    # args = parser.parse_args()
     height = 64
     width = 64
     options = RGBMatrixOptions()
@@ -30,22 +26,36 @@ def main():
     options.hardware_mapping = "adafruit-hat"
     options.brightness = 50
     options.gpio_slowdown = 2
-    matrix = RGBMatrix(options=options)
 
+    # Must be initialized BEFORE the matrix
+    button_led_red = LED(15)
+    button_led_red.on()
+    button_green = Button(14)
+
+    board = np.array([[]])
+
+    def reset_board():
+        nonlocal board
+        board = np.random.randint(0, 2, (height, width), dtype=np.uint8)
+
+    reset_board()
+    button_green.when_pressed = reset_board
+
+    matrix = RGBMatrix(options=options)
     canvas = matrix.CreateFrameCanvas()
 
-    board = np.array(
-        [[random.randint(0, 1) for _ in range(width)] for _ in range(height)]
-    )
     palette = np.array([[0, 0, 0], [255, 255, 255]], dtype=np.uint8)
 
-    while True:
-        rgb = palette[board.astype(np.uint8)]
-        img = Image.fromarray(rgb, mode="RGB")
-        canvas.SetImage(img)
-        canvas = matrix.SwapOnVSync(canvas)
-        sleep(1)
-        board = get_next_board(board)
+    try:
+        while True:
+            rgb = palette[board.astype(np.uint8)]
+            img = Image.fromarray(rgb, mode="RGB")
+            canvas.SetImage(img)
+            canvas = matrix.SwapOnVSync(canvas)
+            sleep(1)
+            board = get_next_board(board)
+    finally:
+        button_led_red.off()
 
 
 if __name__ == "__main__":
