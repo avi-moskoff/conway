@@ -32,10 +32,10 @@ class GameRunner:
         self._game_index = 0
 
         # GPIO devices must be initialized before the matrix.
-        self._status_led_red = LED(15)
+        self._button_led_red = LED(15)
         self._reset_button_green = Button(14)
         self._game_encoder_yellow_white = RotaryEncoder(18, 19)
-        self._status_led_red.on()
+        self._button_led_red.on()
         self._reset_button_green.when_pressed = self.reset_current_game
         self._game_encoder_yellow_white.when_rotated_clockwise = self.next_game
         self._game_encoder_yellow_white.when_rotated_counter_clockwise = (
@@ -99,4 +99,4 @@ class GameRunner:
             try:
                 self.display.turn_off()
             finally:
-                self._status_led_red.off()
+                self._button_led_red.off()
