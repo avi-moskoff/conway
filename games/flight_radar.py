@@ -49,9 +49,8 @@ class FlightRadarGame(Game):
         self._routes: dict[str, tuple[FlightRoute | None, float]] = {}
         self._snapshot_time: float | None = None
         self._has_error = False
-        self._scroll_offset = 0
         self._last_label = ""
-        self._font = ImageFont.load_default()
+        self._font = ImageFont.load_default(size=6)
 
     def activate(self) -> None:
         if self._worker is None:
@@ -77,11 +76,10 @@ class FlightRadarGame(Game):
         logger.info("Flight radar polling stopped")
 
     def reset(self) -> None:
-        self._scroll_offset = 0
         self._wake_event.set()
 
     def advance(self) -> None:
-        self._scroll_offset += 1
+        pass
 
     @property
     def frame(self) -> np.ndarray:
@@ -216,15 +214,35 @@ class FlightRadarGame(Game):
                 for callsign, cached in self._routes.items()
                 if cached[1] > now
             }
-            missing = [
+            eligible = [
                 plane
                 for plane in aircraft
                 if plane.callsign
-                and (
-                    plane.callsign not in self._routes
-                    or self._routes[plane.callsign][1] <= now
-                )
+                and not plane.on_ground
+                and plane.seen_seconds <= self.maximum_position_age_seconds
             ]
+            closest = min(
+                eligible,
+                default=None,
+                key=lambda plane: sum(
+                    value * value
+                    for value in offset_nautical_miles(
+                        plane.latitude,
+                        plane.longitude,
+                        self._config.home_latitude,
+                        self._config.home_longitude,
+                    )
+                ),
+            )
+            missing = (
+                [closest]
+                if closest is not None
+                and (
+                    closest.callsign not in self._routes
+                    or self._routes[closest.callsign][1] <= now
+                )
+                else []
+            )
         if not missing:
             return
         try:
@@ -260,15 +278,12 @@ class FlightRadarGame(Game):
         return latitude, longitude
 
     def _draw_ticker(self, frame: np.ndarray, label: str) -> None:
-        if label != self._last_label:
-            self._last_label = label
-            self._scroll_offset = 0
+        self._last_label = label
         canvas = Image.new("RGB", (self.width, self.ticker_height), "black")
         draw = ImageDraw.Draw(canvas)
         text_width = int(draw.textlength(label, font=self._font))
-        travel = text_width + self.width
-        x = self.width - self._scroll_offset % max(1, travel)
-        draw.text((x, -2), label, fill=self.featured_aircraft_color, font=self._font)
+        x = max(0, (self.width - text_width) // 2)
+        draw.text((x, 0), label, fill=self.featured_aircraft_color, font=self._font)
         # Avoid Pillow's Image.__array_interface__, which goes through
         # Image.tobytes() and unnecessarily requires the optional ImageFile
         # module on the minimal Raspberry Pi installation.

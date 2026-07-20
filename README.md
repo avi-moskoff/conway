@@ -160,8 +160,9 @@ CONWAY_ADSB_POLL_SECONDS=15
 
 The airport coordinates are optional. When present and within the displayed
 radius, the airport appears as a green pixel. The closest aircraft is yellow
-to match its ticker text; other aircraft are white and the installation is the
-blue center pixel.
+to match its static ticker label; other aircraft are white and the installation
+is the blue center pixel. The label includes the callsign and estimated route
+when one is available.
 
 The optional settings `CONWAY_ADSB_API_URL` and `CONWAY_ADSB_API_KEY` make it
 possible to switch to another compatible endpoint later. The public

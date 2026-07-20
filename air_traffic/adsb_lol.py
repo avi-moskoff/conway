@@ -2,6 +2,7 @@ import json
 from collections.abc import Callable, Iterable
 from math import ceil
 from urllib.error import HTTPError, URLError
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from air_traffic.models import Aircraft, FlightRoute
@@ -65,6 +66,15 @@ class AdsbLolClient:
         planes = list(planes_by_callsign.values())
         if not planes:
             return {}
+        if len(planes) == 1:
+            plane = planes[0]
+            callsign = quote(str(plane["callsign"]), safe="")
+            path = (
+                f"/api/0/route/{callsign}/"
+                f"{plane['lat']:.6f}/{plane['lng']:.6f}"
+            )
+            payload = self._request_json(Request(self._base_url + path))
+            return self._parse_routes(payload)
         routes = {}
         for start in range(0, len(planes), 100):
             body = json.dumps({"planes": planes[start : start + 100]}).encode()
@@ -155,7 +165,11 @@ class AdsbLolClient:
     def _parse_routes(payload: object) -> dict[str, FlightRoute]:
         if payload is None:
             return {}
-        records = payload.get("routes", payload) if isinstance(payload, dict) else payload
+        if isinstance(payload, dict):
+            nested_routes = payload.get("routes")
+            records = nested_routes if isinstance(nested_routes, list) else [payload]
+        else:
+            records = payload
         if not isinstance(records, list):
             return {}
         routes = {}
