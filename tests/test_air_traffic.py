@@ -87,6 +87,17 @@ class AdsbLolClientTests(unittest.TestCase):
         self.assertEqual(parsed["TEST1"].label, "PHX>ORD")
         self.assertTrue(parsed["TEST1"].plausible)
 
+    def test_preserves_intermediate_route_stops(self) -> None:
+        route = {
+            "callsign": "TEST1",
+            "_airport_codes_iata": "LAX-PHX-LAX",
+            "plausible": True,
+        }
+
+        parsed = AdsbLolClient._parse_routes(route)
+
+        self.assertEqual(parsed["TEST1"].label, "LAX>PHX>LAX")
+
     def test_rate_limit_exposes_retry_after(self) -> None:
         def rate_limited(_request, _timeout):
             raise HTTPError("url", 429, "slow down", {"Retry-After": "42"}, None)

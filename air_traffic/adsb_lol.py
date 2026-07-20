@@ -180,7 +180,11 @@ class AdsbLolClient:
             airport_codes = record.get("_airport_codes_iata")
             if not airport_codes or airport_codes == "unknown":
                 airport_codes = record.get("airport_codes")
-            codes = str(airport_codes or "").split("-")
+            codes = tuple(
+                code.strip()
+                for code in str(airport_codes or "").split("-")
+                if code.strip()
+            )
             origin = record.get("origin") or record.get("from")
             destination = record.get("destination") or record.get("to")
             if len(codes) >= 2:
@@ -188,9 +192,14 @@ class AdsbLolClient:
             if callsign and (origin or destination):
                 plausible_value = record.get("plausible")
                 routes[callsign] = FlightRoute(
-                    callsign,
-                    str(origin).strip() if origin else None,
-                    str(destination).strip() if destination else None,
-                    bool(plausible_value) if plausible_value is not None else None,
+                    callsign=callsign,
+                    origin=str(origin).strip() if origin else None,
+                    destination=str(destination).strip() if destination else None,
+                    plausible=(
+                        bool(plausible_value)
+                        if plausible_value is not None
+                        else None
+                    ),
+                    via=codes[1:-1],
                 )
         return routes

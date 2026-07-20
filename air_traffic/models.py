@@ -26,9 +26,13 @@ class FlightRoute:
     origin: str | None = None
     destination: str | None = None
     plausible: bool | None = None
+    via: tuple[str, ...] = ()
 
     @property
     def label(self) -> str | None:
-        if self.origin and self.destination:
-            return f"{self.origin}>{self.destination}"
-        return self.origin or self.destination
+        airports = tuple(
+            airport
+            for airport in (self.origin, *self.via, self.destination)
+            if airport
+        )
+        return ">".join(airports) or None
