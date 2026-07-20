@@ -19,11 +19,12 @@ class FlightRadarGame(Game):
     """North-up view of live aircraft near the configured location."""
 
     frame_delay_seconds = 0.1
-    ticker_height = 10
+    ticker_height = 12
     maximum_position_age_seconds = 60.0
     stale_snapshot_seconds = 60.0
     route_ttl_seconds = 6 * 60 * 60
     missing_route_ttl_seconds = 15 * 60
+    failed_route_ttl_seconds = 5 * 60
     featured_aircraft_color = (255, 180, 0)
     other_aircraft_color = (255, 255, 255)
     airport_color = (0, 255, 0)
@@ -52,7 +53,7 @@ class FlightRadarGame(Game):
         self._last_label = ""
         self._scroll_offset = 0
         self._ticker_scrolls = False
-        self._font = ImageFont.load_default(size=10)
+        self._font = ImageFont.load_default(size=12)
 
     def activate(self) -> None:
         if self._worker is None:
@@ -251,8 +252,23 @@ class FlightRadarGame(Game):
             return
         try:
             found = self._client.routes_for(missing)
+        except RateLimitedError as error:
+            retry_after = error.retry_after_seconds or self.failed_route_ttl_seconds
+            self._cache_route_failure(missing, now + retry_after)
+            logger.warning(
+                "Flight route lookup rate limited; retrying in %.0f seconds",
+                retry_after,
+            )
+            return
         except Exception as error:
-            logger.warning("Flight route lookup failed: %s", error)
+            self._cache_route_failure(
+                missing, now + self.failed_route_ttl_seconds
+            )
+            logger.warning(
+                "Flight route lookup failed: %s; retrying in %.0f seconds",
+                error,
+                self.failed_route_ttl_seconds,
+            )
             return
         logger.info(
             "Flight radar received routes for %d of %d aircraft",
@@ -269,6 +285,14 @@ class FlightRadarGame(Game):
                     route = None
                 ttl = self.route_ttl_seconds if route else self.missing_route_ttl_seconds
                 self._routes[callsign] = (route, now + ttl)
+
+    def _cache_route_failure(
+        self, aircraft: list[Aircraft], expires_at: float
+    ) -> None:
+        with self._data_lock:
+            for plane in aircraft:
+                if plane.callsign:
+                    self._routes[plane.callsign] = (None, expires_at)
 
     def _extrapolate(self, plane: Aircraft, elapsed: float) -> tuple[float, float]:
         if plane.ground_speed_knots is None or plane.track_degrees is None:

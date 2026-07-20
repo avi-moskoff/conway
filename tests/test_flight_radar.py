@@ -4,6 +4,7 @@ import unittest
 
 import numpy as np
 
+from air_traffic import AdsbLolError
 from air_traffic.models import Aircraft, FlightRoute
 from config import FlightRadarConfig
 from games.flight_radar import FlightRadarGame
@@ -15,6 +16,8 @@ class FakeClient:
         self.called = Event()
         self._lock = Lock()
         self.routes = {}
+        self.route_calls = 0
+        self.route_error = None
 
     def nearby_aircraft(self, _latitude, _longitude, _radius):
         with self._lock:
@@ -36,6 +39,9 @@ class FakeClient:
         )
 
     def routes_for(self, _aircraft):
+        self.route_calls += 1
+        if self.route_error is not None:
+            raise self.route_error
         return self.routes
 
 
@@ -128,6 +134,15 @@ class FlightRadarGameTests(unittest.TestCase):
 
         cached_route, _expires = self.game._routes["TEST1"]
         self.assertIsNone(cached_route)
+
+    def test_route_failure_has_a_cooldown(self) -> None:
+        self.client.route_error = AdsbLolError("HTTP 500")
+        aircraft = self.client.nearby_aircraft(0, 0, 0)
+
+        self.game._update_routes(aircraft)
+        self.game._update_routes(aircraft)
+
+        self.assertEqual(self.client.route_calls, 1)
 
     def test_polling_pauses_and_restarts_with_lifecycle(self) -> None:
         self.game.activate()
