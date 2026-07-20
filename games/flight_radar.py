@@ -187,7 +187,7 @@ class FlightRadarGame(Game):
                     self._aircraft = aircraft
                     self._snapshot_time = monotonic()
                     self._has_error = False
-                logger.info("Flight radar received %d aircraft", len(aircraft))
+                logger.debug("Flight radar received %d aircraft", len(aircraft))
                 self._update_routes(aircraft)
                 failures = 0
                 wait_seconds = self._config.poll_seconds
@@ -270,7 +270,7 @@ class FlightRadarGame(Game):
                 self.failed_route_ttl_seconds,
             )
             return
-        logger.info(
+        logger.debug(
             "Flight radar received routes for %d of %d aircraft",
             len(found),
             len(missing),

@@ -156,6 +156,7 @@ CONWAY_AIRPORT_LATITUDE=...
 CONWAY_AIRPORT_LONGITUDE=...
 CONWAY_FLIGHT_RADIUS_NM=8
 CONWAY_ADSB_POLL_SECONDS=15
+CONWAY_LOG_LEVEL=INFO
 ```
 
 The airport coordinates are optional. When present and within the displayed
@@ -164,6 +165,13 @@ to match its ticker label; other aircraft are white and the installation is the
 blue center pixel. The label includes the callsign and estimated route when one
 is available and adsb.lol marks it plausible. Short labels remain centered
 while longer labels scroll.
+
+Routine successful API polls are logged only at `DEBUG`, so the default
+`INFO` level records startup, game changes, and failures without writing a
+message every polling interval. Set `CONWAY_LOG_LEVEL=WARNING` for only
+problems, or temporarily use `DEBUG` while troubleshooting. When running as a
+service, these messages go to systemd-journald; inspect its current footprint
+with `journalctl --disk-usage`.
 
 The optional settings `CONWAY_ADSB_API_URL` and `CONWAY_ADSB_API_KEY` make it
 possible to switch to another compatible endpoint later. The public
