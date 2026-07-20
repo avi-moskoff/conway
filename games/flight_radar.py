@@ -19,7 +19,7 @@ class FlightRadarGame(Game):
     """North-up view of live aircraft near the configured location."""
 
     frame_delay_seconds = 0.1
-    ticker_height = 8
+    ticker_height = 10
     maximum_position_age_seconds = 60.0
     stale_snapshot_seconds = 60.0
     route_ttl_seconds = 6 * 60 * 60
@@ -52,7 +52,7 @@ class FlightRadarGame(Game):
         self._last_label = ""
         self._scroll_offset = 0
         self._ticker_scrolls = False
-        self._font = ImageFont.load_default(size=9)
+        self._font = ImageFont.load_default(size=10)
 
     def activate(self) -> None:
         if self._worker is None:
@@ -265,6 +265,8 @@ class FlightRadarGame(Game):
                 if callsign is None:
                     continue
                 route = found.get(callsign)
+                if route is not None and route.plausible is not True:
+                    route = None
                 ttl = self.route_ttl_seconds if route else self.missing_route_ttl_seconds
                 self._routes[callsign] = (route, now + ttl)
 
@@ -293,10 +295,10 @@ class FlightRadarGame(Game):
             cycle_width = text_width + 8
             x = -(self._scroll_offset % cycle_width)
             draw.text(
-                (x, -2), label, fill=self.featured_aircraft_color, font=self._font
+                (x, -1), label, fill=self.featured_aircraft_color, font=self._font
             )
             draw.text(
-                (x + cycle_width, -2),
+                (x + cycle_width, -1),
                 label,
                 fill=self.featured_aircraft_color,
                 font=self._font,
@@ -304,7 +306,7 @@ class FlightRadarGame(Game):
         else:
             x = (self.width - text_width) // 2
             draw.text(
-                (x, -2), label, fill=self.featured_aircraft_color, font=self._font
+                (x, -1), label, fill=self.featured_aircraft_color, font=self._font
             )
         # Avoid Pillow's Image.__array_interface__, which goes through
         # Image.tobytes() and unnecessarily requires the optional ImageFile

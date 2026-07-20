@@ -186,9 +186,11 @@ class AdsbLolClient:
             if len(codes) >= 2:
                 origin, destination = codes[0], codes[-1]
             if callsign and (origin or destination):
+                plausible_value = record.get("plausible")
                 routes[callsign] = FlightRoute(
                     callsign,
                     str(origin).strip() if origin else None,
                     str(destination).strip() if destination else None,
+                    bool(plausible_value) if plausible_value is not None else None,
                 )
         return routes

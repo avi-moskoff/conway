@@ -14,6 +14,7 @@ class FakeClient:
         self.calls = 0
         self.called = Event()
         self._lock = Lock()
+        self.routes = {}
 
     def nearby_aircraft(self, _latitude, _longitude, _radius):
         with self._lock:
@@ -35,7 +36,7 @@ class FakeClient:
         )
 
     def routes_for(self, _aircraft):
-        return {}
+        return self.routes
 
 
 class FlightRadarGameTests(unittest.TestCase):
@@ -77,7 +78,10 @@ class FlightRadarGameTests(unittest.TestCase):
         with self.game._data_lock:
             self.game._aircraft = self.client.nearby_aircraft(0, 0, 0)
             self.game._routes = {
-                "TEST1": (FlightRoute("TEST1", "PHX", "SEA"), monotonic() + 60)
+                "TEST1": (
+                    FlightRoute("TEST1", "PHX", "SEA", plausible=True),
+                    monotonic() + 60,
+                )
             }
             self.game._snapshot_time = monotonic()
 
@@ -101,7 +105,10 @@ class FlightRadarGameTests(unittest.TestCase):
         with self.game._data_lock:
             self.game._aircraft = self.client.nearby_aircraft(0, 0, 0)
             self.game._routes = {
-                "TEST1": (FlightRoute("TEST1", "PHX", "SEA"), monotonic() + 60)
+                "TEST1": (
+                    FlightRoute("TEST1", "PHX", "SEA", plausible=True),
+                    monotonic() + 60,
+                )
             }
             self.game._snapshot_time = monotonic()
         first_ticker = self.game.frame[-self.game.ticker_height :].copy()
@@ -111,6 +118,16 @@ class FlightRadarGameTests(unittest.TestCase):
 
         second_ticker = self.game.frame[-self.game.ticker_height :]
         self.assertFalse(np.array_equal(first_ticker, second_ticker))
+
+    def test_route_enrichment_keeps_only_plausible_routes(self) -> None:
+        self.client.routes = {
+            "TEST1": FlightRoute("TEST1", "PHX", "SEA", plausible=False)
+        }
+
+        self.game._update_routes(self.client.nearby_aircraft(0, 0, 0))
+
+        cached_route, _expires = self.game._routes["TEST1"]
+        self.assertIsNone(cached_route)
 
     def test_polling_pauses_and_restarts_with_lifecycle(self) -> None:
         self.game.activate()

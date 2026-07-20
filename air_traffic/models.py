@@ -25,6 +25,7 @@ class FlightRoute:
     callsign: str
     origin: str | None = None
     destination: str | None = None
+    plausible: bool | None = None
 
     @property
     def label(self) -> str | None:
