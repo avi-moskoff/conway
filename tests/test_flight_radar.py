@@ -107,6 +107,16 @@ class FlightRadarGameTests(unittest.TestCase):
         second_ticker = self.game.frame[-self.game.ticker_height :]
         np.testing.assert_array_equal(first_ticker, second_ticker)
 
+    def test_ticker_uses_only_hard_edged_colors(self) -> None:
+        with self.game._data_lock:
+            self.game._aircraft = self.client.nearby_aircraft(0, 0, 0)
+            self.game._snapshot_time = monotonic()
+
+        ticker = self.game.frame[-self.game.ticker_height :]
+        colors = {tuple(color) for color in ticker.reshape(-1, 3)}
+
+        self.assertEqual(colors, {(0, 0, 0), self.game.featured_aircraft_color})
+
     def test_long_ticker_scrolls(self) -> None:
         with self.game._data_lock:
             self.game._aircraft = self.client.nearby_aircraft(0, 0, 0)

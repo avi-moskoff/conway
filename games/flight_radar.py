@@ -311,7 +311,7 @@ class FlightRadarGame(Game):
         if label != self._last_label:
             self._scroll_offset = 0
         self._last_label = label
-        canvas = Image.new("RGB", (self.width, self.ticker_height), "black")
+        canvas = Image.new("1", (self.width, self.ticker_height), 0)
         draw = ImageDraw.Draw(canvas)
         text_width = int(draw.textlength(label, font=self._font))
         self._ticker_scrolls = text_width > self.width
@@ -319,23 +319,22 @@ class FlightRadarGame(Game):
             cycle_width = text_width + 8
             x = -(self._scroll_offset % cycle_width)
             draw.text(
-                (x, -1), label, fill=self.featured_aircraft_color, font=self._font
+                (x, -1), label, fill=1, font=self._font
             )
             draw.text(
                 (x + cycle_width, -1),
                 label,
-                fill=self.featured_aircraft_color,
+                fill=1,
                 font=self._font,
             )
         else:
             x = (self.width - text_width) // 2
-            draw.text(
-                (x, -1), label, fill=self.featured_aircraft_color, font=self._font
-            )
+            draw.text((x, -1), label, fill=1, font=self._font)
         # Avoid Pillow's Image.__array_interface__, which goes through
         # Image.tobytes() and unnecessarily requires the optional ImageFile
         # module on the minimal Raspberry Pi installation.
-        pixels = np.asarray(list(canvas.get_flattened_data()), dtype=np.uint8)
-        frame[-self.ticker_height :] = pixels.reshape(
-            self.ticker_height, self.width, 3
-        )
+        mask = np.asarray(list(canvas.get_flattened_data()), dtype=np.uint8)
+        mask = mask.reshape(self.ticker_height, self.width) != 0
+        ticker = frame[-self.ticker_height :]
+        ticker[:] = 0
+        ticker[mask] = self.featured_aircraft_color
