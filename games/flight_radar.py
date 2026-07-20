@@ -24,6 +24,9 @@ class FlightRadarGame(Game):
     stale_snapshot_seconds = 60.0
     route_ttl_seconds = 6 * 60 * 60
     missing_route_ttl_seconds = 15 * 60
+    featured_aircraft_color = (255, 180, 0)
+    other_aircraft_color = (255, 255, 255)
+    airport_color = (0, 255, 0)
 
     def __init__(
         self,
@@ -94,8 +97,9 @@ class FlightRadarGame(Game):
         frame = np.zeros((self.height, self.width, 3), dtype=np.uint8)
         center_x, center_y = self.width // 2, radar_height // 2
         frame[center_y, center_x] = (0, 64, 255)
+        self._draw_airport(frame, radar_height)
 
-        visible: list[tuple[float, Aircraft]] = []
+        visible: list[tuple[float, Aircraft, tuple[int, int]]] = []
         if not stale:
             elapsed = now - snapshot_time
             for plane in aircraft:
@@ -116,18 +120,21 @@ class FlightRadarGame(Game):
                 )
                 if point is None:
                     continue
-                x, y = point
-                frame[y, x] = (255, 255, 255)
-                self._draw_heading(frame, x, y, plane.track_degrees, radar_height)
                 east, north = offset_nautical_miles(
                     latitude,
                     longitude,
                     self._config.home_latitude,
                     self._config.home_longitude,
                 )
-                visible.append((east * east + north * north, plane))
+                visible.append((east * east + north * north, plane, point))
 
         featured = min(visible, default=None, key=lambda item: item[0])
+        for item in visible:
+            x, y = item[2]
+            frame[y, x] = self.other_aircraft_color
+        if featured is not None:
+            x, y = featured[2]
+            frame[y, x] = self.featured_aircraft_color
         if stale:
             label = "NO SIGNAL"
         elif featured is None:
@@ -136,11 +143,29 @@ class FlightRadarGame(Game):
             plane = featured[1]
             cached = routes.get(plane.callsign or "")
             route_label = cached[0].label if cached and cached[0] else None
-            label = route_label or plane.label
+            label = f"{plane.label} {route_label}" if route_label else plane.label
         if has_error and not stale:
             frame[0, 0] = (255, 0, 0)
         self._draw_ticker(frame, label)
         return frame
+
+    def _draw_airport(self, frame: np.ndarray, radar_height: int) -> None:
+        latitude = self._config.airport_latitude
+        longitude = self._config.airport_longitude
+        if latitude is None or longitude is None:
+            return
+        point = project_position(
+            latitude,
+            longitude,
+            self._config.home_latitude,
+            self._config.home_longitude,
+            self._config.radius_nm,
+            self.width,
+            radar_height,
+        )
+        if point is not None:
+            x, y = point
+            frame[y, x] = self.airport_color
 
     def _poll_loop(self) -> None:
         failures = 0
@@ -207,6 +232,11 @@ class FlightRadarGame(Game):
         except Exception as error:
             logger.warning("Flight route lookup failed: %s", error)
             return
+        logger.info(
+            "Flight radar received routes for %d of %d aircraft",
+            len(found),
+            len(missing),
+        )
         with self._data_lock:
             for plane in missing:
                 callsign = plane.callsign
@@ -229,22 +259,6 @@ class FlightRadarGame(Game):
         longitude = plane.longitude + east / longitude_scale
         return latitude, longitude
 
-    @staticmethod
-    def _draw_heading(
-        frame: np.ndarray,
-        x: int,
-        y: int,
-        track_degrees: float | None,
-        radar_height: int,
-    ) -> None:
-        if track_degrees is None:
-            return
-        heading = radians(track_degrees)
-        nose_x = x + round(sin(heading))
-        nose_y = y - round(cos(heading))
-        if 0 <= nose_x < frame.shape[1] and 0 <= nose_y < radar_height:
-            frame[nose_y, nose_x] = (0, 192, 255)
-
     def _draw_ticker(self, frame: np.ndarray, label: str) -> None:
         if label != self._last_label:
             self._last_label = label
@@ -254,7 +268,7 @@ class FlightRadarGame(Game):
         text_width = int(draw.textlength(label, font=self._font))
         travel = text_width + self.width
         x = self.width - self._scroll_offset % max(1, travel)
-        draw.text((x, -2), label, fill=(255, 180, 0), font=self._font)
+        draw.text((x, -2), label, fill=self.featured_aircraft_color, font=self._font)
         # Avoid Pillow's Image.__array_interface__, which goes through
         # Image.tobytes() and unnecessarily requires the optional ImageFile
         # module on the minimal Raspberry Pi installation.

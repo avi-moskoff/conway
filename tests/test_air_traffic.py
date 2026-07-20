@@ -49,7 +49,7 @@ class AdsbLolClientTests(unittest.TestCase):
         client = AdsbLolClient(transport=lambda _request, _timeout: b"")
         self.assertEqual(client.routes_for([]), {})
 
-    def test_parses_only_plausible_routes(self) -> None:
+    def test_parses_plausible_and_estimated_routes(self) -> None:
         response = [
             {
                 "callsign": "TEST1",
@@ -73,7 +73,7 @@ class AdsbLolClientTests(unittest.TestCase):
         routes = client.routes_for([aircraft])
 
         self.assertEqual(routes["TEST1"].label, "PHX>SEA")
-        self.assertNotIn("TEST2", routes)
+        self.assertEqual(routes["TEST2"].label, "LAX>JFK")
 
     def test_rate_limit_exposes_retry_after(self) -> None:
         def rate_limited(_request, _timeout):
@@ -108,6 +108,16 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_requires_both_coordinates(self) -> None:
         with patch.dict("os.environ", {"CONWAY_HOME_LATITUDE": "33"}, clear=True):
+            with self.assertRaises(ValueError):
+                FlightRadarConfig.from_environment()
+
+    def test_requires_both_optional_airport_coordinates(self) -> None:
+        environment = {
+            "CONWAY_HOME_LATITUDE": "33",
+            "CONWAY_HOME_LONGITUDE": "-112",
+            "CONWAY_AIRPORT_LATITUDE": "33.4",
+        }
+        with patch.dict("os.environ", environment, clear=True):
             with self.assertRaises(ValueError):
                 FlightRadarConfig.from_environment()
 

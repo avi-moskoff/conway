@@ -152,9 +152,16 @@ Keep them outside the repository by putting them in `/etc/conway.env`:
 ```text
 CONWAY_HOME_LATITUDE=...
 CONWAY_HOME_LONGITUDE=...
+CONWAY_AIRPORT_LATITUDE=...
+CONWAY_AIRPORT_LONGITUDE=...
 CONWAY_FLIGHT_RADIUS_NM=8
 CONWAY_ADSB_POLL_SECONDS=15
 ```
+
+The airport coordinates are optional. When present and within the displayed
+radius, the airport appears as a green pixel. The closest aircraft is yellow
+to match its ticker text; other aircraft are white and the installation is the
+blue center pixel.
 
 The optional settings `CONWAY_ADSB_API_URL` and `CONWAY_ADSB_API_KEY` make it
 possible to switch to another compatible endpoint later. The public

@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from air_traffic.models import Aircraft
+from air_traffic.models import Aircraft, FlightRoute
 from config import FlightRadarConfig
 from games.flight_radar import FlightRadarGame
 
@@ -25,8 +25,12 @@ class FakeClient:
                 callsign="TEST1",
                 latitude=33.0,
                 longitude=-112.0,
-                track_degrees=90,
-                ground_speed_knots=200,
+            ),
+            Aircraft(
+                icao_hex="def456",
+                callsign="TEST2",
+                latitude=33.0,
+                longitude=-111.95,
             ),
         )
 
@@ -40,7 +44,13 @@ class FlightRadarGameTests(unittest.TestCase):
         self.game = FlightRadarGame(
             64,
             64,
-            FlightRadarConfig(33.0, -112.0, poll_seconds=0.05),
+            FlightRadarConfig(
+                33.0,
+                -112.0,
+                poll_seconds=0.05,
+                airport_latitude=33.05,
+                airport_longitude=-112.0,
+            ),
             client=self.client,
         )
 
@@ -56,8 +66,24 @@ class FlightRadarGameTests(unittest.TestCase):
 
         self.assertEqual(frame.shape, (64, 64, 3))
         self.assertEqual(frame.dtype, np.uint8)
+        self.assertTrue(
+            np.any(np.all(frame == self.game.featured_aircraft_color, axis=2))
+        )
         self.assertTrue(np.any(np.all(frame == (255, 255, 255), axis=2)))
-        self.assertTrue(np.any(np.all(frame == (0, 192, 255), axis=2)))
+        self.assertTrue(np.any(np.all(frame == self.game.airport_color, axis=2)))
+        self.assertFalse(np.any(np.all(frame == (0, 192, 255), axis=2)))
+
+    def test_ticker_identifies_closest_aircraft_and_includes_route(self) -> None:
+        with self.game._data_lock:
+            self.game._aircraft = self.client.nearby_aircraft(0, 0, 0)
+            self.game._routes = {
+                "TEST1": (FlightRoute("TEST1", "PHX", "SEA"), monotonic() + 60)
+            }
+            self.game._snapshot_time = monotonic()
+
+        self.game.frame
+
+        self.assertEqual(self.game._last_label, "TEST1 PHX>SEA")
 
     def test_polling_pauses_and_restarts_with_lifecycle(self) -> None:
         self.game.activate()

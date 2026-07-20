@@ -163,8 +163,6 @@ class AdsbLolClient:
             if not isinstance(record, dict):
                 continue
             callsign = str(record.get("callsign") or record.get("flight") or "").strip()
-            if record.get("plausible") is False or record.get("plausible") == 0:
-                continue
             airport_codes = record.get("_airport_codes_iata")
             if not airport_codes or airport_codes == "unknown":
                 airport_codes = record.get("airport_codes")
