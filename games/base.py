@@ -12,6 +12,15 @@ class Game(ABC):
         self.height = height
         self.width = width
 
+    def activate(self) -> None:
+        """Make resources for this game active."""
+
+    def deactivate(self) -> None:
+        """Pause resources while preserving game state."""
+
+    def close(self) -> None:
+        """Release resources owned by this game."""
+
     @property
     @abstractmethod
     def frame(self) -> np.ndarray:

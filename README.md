@@ -7,6 +7,7 @@ includes:
 
 - Conway's Game of Life
 - A boids flocking simulation
+- An optional live aircraft radar powered by adsb.lol
 
 Turn the rotary encoder to switch games. Each game keeps its state while it is
 inactive, so switching back resumes where it left off. Press the illuminated
@@ -145,6 +146,27 @@ uv pip install --no-build-isolation \
 
 ### Running
 
+The flight-radar game is included when both home coordinates are configured.
+Keep them outside the repository by putting them in `/etc/conway.env`:
+
+```text
+CONWAY_HOME_LATITUDE=...
+CONWAY_HOME_LONGITUDE=...
+CONWAY_FLIGHT_RADIUS_NM=8
+CONWAY_ADSB_POLL_SECONDS=15
+```
+
+The optional settings `CONWAY_ADSB_API_URL` and `CONWAY_ADSB_API_KEY` make it
+possible to switch to another compatible endpoint later. The public
+[adsb.lol](https://adsb.lol/) service is used by default. Aircraft positions
+come from community receivers, so coverage can vary. Origin and destination
+labels are inferred from callsigns when route data is available; they are not
+broadcast by the aircraft and should be treated as best-effort.
+
+The radar makes no requests while another game is selected. Its aircraft and
+route caches live only in RAM, and neither coordinates nor aircraft history are
+written to disk by the application.
+
 Run the entry point with the permissions required by the RGB matrix driver:
 
 ```sh
@@ -171,6 +193,14 @@ sudo systemctl stop conway
 To restart:
 
 ```sh
+sudo systemctl restart conway
+```
+
+After editing `/etc/conway.env` or the service file, reload systemd before
+restarting:
+
+```sh
+sudo systemctl daemon-reload
 sudo systemctl restart conway
 ```
 

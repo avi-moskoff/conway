@@ -20,6 +20,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "gpiozero" },
+    { name = "numpy" },
     { name = "pillow" },
     { name = "rgbmatrix" },
     { name = "scipy" },
@@ -33,6 +34,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "gpiozero", specifier = ">=2.0.1" },
+    { name = "numpy", specifier = ">=2.0.0" },
     { name = "pillow", specifier = ">=12.3.0" },
     { name = "rgbmatrix", git = "https://github.com/hzeller/rpi-rgb-led-matrix" },
     { name = "scipy", specifier = ">=1.18.0" },
