@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+import logging
 from signal import SIGTERM, signal
 from threading import Event, Lock
 
@@ -8,6 +9,8 @@ from gpiozero import Button, LED, RotaryEncoder
 from config import FlightRadarConfig
 from display import MatrixDisplay
 from games import BoidsGame, FlightRadarGame, Game, GameOfLife
+
+logger = logging.getLogger(__name__)
 
 
 class GameRunner:
@@ -24,6 +27,11 @@ class GameRunner:
             raise ValueError("At least one game is required")
         for game in self._games:
             self._validate_game(game)
+        logger.info(
+            "Available games (%d): %s",
+            len(self._games),
+            ", ".join(type(game).__name__ for game in self._games),
+        )
         self._game_index = 0
         self._running = False
 
@@ -78,6 +86,7 @@ class GameRunner:
         if running and old_game is not new_game:
             old_game.deactivate()
             new_game.activate()
+            logger.info("Selected game: %s", type(new_game).__name__)
 
     def reset_current_game(self) -> None:
         with self._game_lock:
@@ -110,6 +119,8 @@ class GameRunner:
             games.append(
                 FlightRadarGame(self.HEIGHT, self.WIDTH, config=flight_config)
             )
+        else:
+            logger.info("Flight radar disabled: home coordinates are not configured")
         return games
 
     def stop(self, _signal_number: int, _frame: object) -> None:
@@ -124,6 +135,7 @@ class GameRunner:
                 self._running = True
                 initial_game = self._games[self._game_index]
             initial_game.activate()
+            logger.info("Selected game: %s", type(initial_game).__name__)
             while not self._stop_event.is_set():
                 game, frame = self._current_frame()
                 self.display.show(frame)

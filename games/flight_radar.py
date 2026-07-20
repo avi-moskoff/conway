@@ -1,3 +1,4 @@
+import logging
 import random
 from math import cos, radians, sin
 from threading import Event, Lock, Thread
@@ -10,6 +11,8 @@ from air_traffic import AdsbLolClient, Aircraft, FlightRoute, RateLimitedError
 from air_traffic.projection import offset_nautical_miles, project_position
 from config import FlightRadarConfig
 from games.base import Game
+
+logger = logging.getLogger(__name__)
 
 
 class FlightRadarGame(Game):
@@ -55,10 +58,12 @@ class FlightRadarGame(Game):
             self._worker.start()
         self._active_event.set()
         self._wake_event.set()
+        logger.info("Flight radar polling activated")
 
     def deactivate(self) -> None:
         self._active_event.clear()
         self._wake_event.set()
+        logger.info("Flight radar polling paused")
 
     def close(self) -> None:
         self._stop_event.set()
@@ -66,6 +71,7 @@ class FlightRadarGame(Game):
         self._wake_event.set()
         if self._worker is not None:
             self._worker.join(timeout=11.0)
+        logger.info("Flight radar polling stopped")
 
     def reset(self) -> None:
         self._scroll_offset = 0
@@ -153,18 +159,21 @@ class FlightRadarGame(Game):
                     self._aircraft = aircraft
                     self._snapshot_time = monotonic()
                     self._has_error = False
+                logger.info("Flight radar received %d aircraft", len(aircraft))
                 self._update_routes(aircraft)
                 failures = 0
                 wait_seconds = self._config.poll_seconds
             except RateLimitedError as error:
                 failures += 1
                 self._mark_error()
+                logger.warning("Flight radar rate limited; backing off")
                 wait_seconds = error.retry_after_seconds or max(
                     60.0, self._config.poll_seconds * 4
                 )
-            except Exception:
+            except Exception as error:
                 failures += 1
                 self._mark_error()
+                logger.warning("Flight radar poll failed: %s", error)
                 exponential = self._config.poll_seconds * (2 ** min(failures, 5))
                 wait_seconds = min(5 * 60.0, exponential) * random.uniform(0.8, 1.2)
             self._wake_event.wait(wait_seconds)
@@ -195,7 +204,8 @@ class FlightRadarGame(Game):
             return
         try:
             found = self._client.routes_for(missing)
-        except Exception:
+        except Exception as error:
+            logger.warning("Flight route lookup failed: %s", error)
             return
         with self._data_lock:
             for plane in missing:
