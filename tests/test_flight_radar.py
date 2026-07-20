@@ -97,6 +97,21 @@ class FlightRadarGameTests(unittest.TestCase):
         second_ticker = self.game.frame[-self.game.ticker_height :]
         np.testing.assert_array_equal(first_ticker, second_ticker)
 
+    def test_long_ticker_scrolls(self) -> None:
+        with self.game._data_lock:
+            self.game._aircraft = self.client.nearby_aircraft(0, 0, 0)
+            self.game._routes = {
+                "TEST1": (FlightRoute("TEST1", "PHX", "SEA"), monotonic() + 60)
+            }
+            self.game._snapshot_time = monotonic()
+        first_ticker = self.game.frame[-self.game.ticker_height :].copy()
+
+        for _ in range(5):
+            self.game.advance()
+
+        second_ticker = self.game.frame[-self.game.ticker_height :]
+        self.assertFalse(np.array_equal(first_ticker, second_ticker))
+
     def test_polling_pauses_and_restarts_with_lifecycle(self) -> None:
         self.game.activate()
         self.assertTrue(self.client.called.wait(1))

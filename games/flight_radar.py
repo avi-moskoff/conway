@@ -50,7 +50,9 @@ class FlightRadarGame(Game):
         self._snapshot_time: float | None = None
         self._has_error = False
         self._last_label = ""
-        self._font = ImageFont.load_default(size=6)
+        self._scroll_offset = 0
+        self._ticker_scrolls = False
+        self._font = ImageFont.load_default(size=9)
 
     def activate(self) -> None:
         if self._worker is None:
@@ -76,10 +78,12 @@ class FlightRadarGame(Game):
         logger.info("Flight radar polling stopped")
 
     def reset(self) -> None:
+        self._scroll_offset = 0
         self._wake_event.set()
 
     def advance(self) -> None:
-        pass
+        if self._ticker_scrolls:
+            self._scroll_offset += 1
 
     @property
     def frame(self) -> np.ndarray:
@@ -278,12 +282,30 @@ class FlightRadarGame(Game):
         return latitude, longitude
 
     def _draw_ticker(self, frame: np.ndarray, label: str) -> None:
+        if label != self._last_label:
+            self._scroll_offset = 0
         self._last_label = label
         canvas = Image.new("RGB", (self.width, self.ticker_height), "black")
         draw = ImageDraw.Draw(canvas)
         text_width = int(draw.textlength(label, font=self._font))
-        x = max(0, (self.width - text_width) // 2)
-        draw.text((x, 0), label, fill=self.featured_aircraft_color, font=self._font)
+        self._ticker_scrolls = text_width > self.width
+        if self._ticker_scrolls:
+            cycle_width = text_width + 8
+            x = -(self._scroll_offset % cycle_width)
+            draw.text(
+                (x, -2), label, fill=self.featured_aircraft_color, font=self._font
+            )
+            draw.text(
+                (x + cycle_width, -2),
+                label,
+                fill=self.featured_aircraft_color,
+                font=self._font,
+            )
+        else:
+            x = (self.width - text_width) // 2
+            draw.text(
+                (x, -2), label, fill=self.featured_aircraft_color, font=self._font
+            )
         # Avoid Pillow's Image.__array_interface__, which goes through
         # Image.tobytes() and unnecessarily requires the optional ImageFile
         # module on the minimal Raspberry Pi installation.
