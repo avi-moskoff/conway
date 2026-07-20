@@ -255,4 +255,10 @@ class FlightRadarGame(Game):
         travel = text_width + self.width
         x = self.width - self._scroll_offset % max(1, travel)
         draw.text((x, -2), label, fill=(255, 180, 0), font=self._font)
-        frame[-self.ticker_height :] = np.asarray(canvas)
+        # Avoid Pillow's Image.__array_interface__, which goes through
+        # Image.tobytes() and unnecessarily requires the optional ImageFile
+        # module on the minimal Raspberry Pi installation.
+        pixels = np.asarray(list(canvas.get_flattened_data()), dtype=np.uint8)
+        frame[-self.ticker_height :] = pixels.reshape(
+            self.ticker_height, self.width, 3
+        )
