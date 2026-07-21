@@ -7,6 +7,7 @@ from games.base import Game
 class GameOfLife(Game):
     """Owns and evolves a Conway's Game of Life board."""
 
+    frame_delay_seconds = 0.05
     _NEIGHBOR_KERNEL = np.array([[1, 1, 1], [1, 0, 1], [1, 1, 1]], dtype=np.uint8)
     _PALETTE = np.array([[0, 0, 0], [255, 255, 255]], dtype=np.uint8)
 
