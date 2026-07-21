@@ -6,6 +6,7 @@ An interactive animation runner for a 64×64 HUB75 RGB LED matrix. It currently
 includes:
 
 - Conway's Game of Life
+- Langton's Ant on a randomized board
 - A boids flocking simulation
 - An optional live aircraft radar powered by adsb.lol
 

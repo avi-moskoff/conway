@@ -8,7 +8,7 @@ from gpiozero import Button, LED, RotaryEncoder
 
 from config import FlightRadarConfig
 from display import MatrixDisplay
-from games import BoidsGame, FlightRadarGame, Game, GameOfLife
+from games import BoidsGame, FlightRadarGame, Game, GameOfLife, Langton
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +112,7 @@ class GameRunner:
     def _default_games(self) -> list[Game]:
         games: list[Game] = [
             GameOfLife(self.HEIGHT, self.WIDTH),
+            Langton(self.HEIGHT, self.WIDTH),
             BoidsGame(self.HEIGHT, self.WIDTH),
         ]
         flight_config = FlightRadarConfig.from_environment()
