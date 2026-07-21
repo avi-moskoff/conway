@@ -59,7 +59,6 @@ class Langton(Game):
         return board, ant
 
     def reset(self) -> None:
-        # self.board = np.random.randint(0, 2, (self.height, self.width), dtype=np.uint8)
         self.board = np.zeros((self.height, self.width), dtype=np.uint8)
         self.ant = Ant(
             x_position=self.width // 2,
