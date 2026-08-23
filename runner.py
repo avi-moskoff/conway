@@ -38,7 +38,7 @@ class GameRunner:
 
         # GPIO devices must be initialized before the matrix.
         self._button_led_red = LED(15)
-        self._reset_button_green = Button(14)
+        self._reset_button_green = Button(14, bounce_time=0.2)
         self._game_encoder_yellow_white = RotaryEncoder(18, 19)
         self._button_led_red.on()
         self._reset_button_green.when_pressed = self.reset_current_game

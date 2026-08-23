@@ -9,7 +9,7 @@ from games.base import Game
 
 
 class FakeDevice:
-    def __init__(self, *_args) -> None:
+    def __init__(self, *_args, **_kwargs) -> None:
         self.is_on = False
 
     def on(self) -> None:
