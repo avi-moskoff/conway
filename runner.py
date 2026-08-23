@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 import logging
+import os
 from signal import SIGTERM, signal
 from threading import Event, Lock
 
@@ -46,7 +47,8 @@ class GameRunner:
             self.previous_game
         )
 
-        self.display = MatrixDisplay(self.HEIGHT, self.WIDTH)
+        rotation = int(os.getenv("CONWAY_DISPLAY_ROTATION", "180"))
+        self.display = MatrixDisplay(self.HEIGHT, self.WIDTH, rotation=rotation)
 
     @property
     def game(self) -> Game:

@@ -160,6 +160,11 @@ CONWAY_ADSB_POLL_SECONDS=15
 CONWAY_LOG_LEVEL=INFO
 ```
 
+Every game's frame is rotated before it reaches the matrix, to match however the
+panel ends up mounted. Set `CONWAY_DISPLAY_ROTATION` to `0`, `90`, `180`, or
+`270` degrees clockwise; it defaults to `180` (the panel is mounted upside
+down).
+
 The airport coordinates are optional. When present and within the displayed
 radius, the airport appears as a green pixel. The closest aircraft is yellow
 to match its ticker label; other aircraft are white and the installation is the

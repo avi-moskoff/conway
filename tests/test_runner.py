@@ -20,7 +20,7 @@ class FakeDevice:
 
 
 class FakeDisplay:
-    def __init__(self, _height, _width) -> None:
+    def __init__(self, _height, _width, rotation: int = 90) -> None:
         self.frames = 0
         self.is_off = False
         self.on_show = lambda: None
