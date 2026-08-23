@@ -44,18 +44,16 @@ class FlightRadarGame(Game):
     route_ttl_seconds = 6 * 60 * 60
     missing_route_ttl_seconds = 15 * 60
     failed_route_ttl_seconds = 5 * 60
-    # "Interest" - home, airport, error, and the currently featured/selected
-    # vehicle - all share one color. They're all either fixed single points
-    # or a one-at-a-time highlight, so position/context tells them apart;
-    # reserving green/red exclusively for east/west trains matters far more,
-    # since a train dot is identified by color alone as it rides the line.
-    featured_aircraft_color = (255, 230, 0)
-    airport_color = (255, 230, 0)
-    home_color = (255, 230, 0)
-    error_color = (255, 230, 0)
-    other_aircraft_color = (150, 150, 150)
+    # Aircraft mode and rail modes never draw at the same time (see frame),
+    # so within a mode there's only ever a handful of categories that need
+    # to be distinct from each other, not from every color in the whole app.
+    featured_aircraft_color = (255, 0, 0)
+    airport_color = (255, 0, 0)
+    home_color = (255, 0, 0)
+    error_color = (255, 0, 0)
+    other_aircraft_color = (255, 255, 255)
     eastbound_train_color = (0, 255, 0)
-    westbound_train_color = (255, 0, 0)
+    westbound_train_color = (255, 230, 0)
     rail_line_color = (0, 0, 255)
 
     def __init__(
@@ -186,21 +184,26 @@ class FlightRadarGame(Game):
             matched_train.vehicle_id if matched_train is not None else None
         )
 
-        self._draw_rail_lines(frame, radar_height)
         frame[center_y, center_x] = self.home_color
-        self._draw_airport(frame, radar_height)
-        self._draw_trains(
-            frame,
-            radar_height,
-            trains,
-            train_velocities,
-            train_snapshot_time,
-            now,
-            highlighted_vehicle_id,
-        )
+        # Aircraft and rail traffic are never drawn together - keeping each
+        # mode to its own set of colors means nothing needs to be distinct
+        # from a category that isn't even on screen.
+        if mode == "aircraft":
+            self._draw_airport(frame, radar_height)
+        else:
+            self._draw_rail_lines(frame, radar_height)
+            self._draw_trains(
+                frame,
+                radar_height,
+                trains,
+                train_velocities,
+                train_snapshot_time,
+                now,
+                highlighted_vehicle_id,
+            )
 
         visible: list[tuple[float, Aircraft, tuple[int, int]]] = []
-        if not stale:
+        if mode == "aircraft" and not stale:
             elapsed = now - snapshot_time
             for plane in aircraft:
                 if (
@@ -228,11 +231,7 @@ class FlightRadarGame(Game):
                 )
                 visible.append((east * east + north * north, plane, point))
 
-        featured = (
-            min(visible, default=None, key=lambda item: item[0])
-            if mode == "aircraft"
-            else None
-        )
+        featured = min(visible, default=None, key=lambda item: item[0])
         for item in visible:
             x, y = item[2]
             frame[y, x] = self.other_aircraft_color

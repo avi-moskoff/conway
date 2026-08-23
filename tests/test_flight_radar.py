@@ -8,6 +8,7 @@ from PIL import Image, ImageDraw
 
 from air_traffic import AdsbLolError
 from air_traffic.models import Aircraft, FlightRoute
+from air_traffic.projection import project_position
 from config import FlightRadarConfig
 from games.flight_radar import FlightRadarGame
 from transit.models import StopArrival, Train
@@ -103,6 +104,45 @@ class FlightRadarGameTests(unittest.TestCase):
         )
         self.assertTrue(np.any(np.all(frame == self.game.airport_color, axis=2)))
         self.assertFalse(np.any(np.all(frame == (0, 192, 255), axis=2)))
+
+    def test_aircraft_mode_hides_rail_and_trains(self) -> None:
+        synthetic_line = {"A": ((33.0, -112.0), (33.0, -111.95))}
+        with patch("games.flight_radar.LINE_GEOMETRY", synthetic_line):
+            with self.game._data_lock:
+                self.game._aircraft = self.client.nearby_aircraft(0, 0, 0)
+                self.game._snapshot_time = monotonic()
+                self.game._trains = (Train("1", "A", 0, 33.0, -111.98),)
+                self.game._train_snapshot_time = monotonic()
+
+            frame = self.game.frame
+
+        self.assertFalse(np.any(np.all(frame == self.game.rail_line_color, axis=2)))
+        self.assertFalse(
+            np.any(np.all(frame == self.game.eastbound_train_color, axis=2))
+        )
+
+    def test_train_mode_hides_aircraft_and_airport(self) -> None:
+        # airport_color == home_color, so checking the frame for that color
+        # can't tell the two apart; check the airport's own pixel instead.
+        radar_height = self.game.height - self.game.ticker_height - 1
+        airport_pixel = project_position(
+            33.05, -112.0, 33.0, -112.0, self.game._config.radius_nm,
+            self.game.width, radar_height,
+        )
+
+        self.game.reset()  # -> westbound_eta
+        with self.game._data_lock:
+            self.game._aircraft = self.client.nearby_aircraft(0, 0, 0)
+            self.game._snapshot_time = monotonic()
+
+        frame = self.game.frame
+
+        self.assertFalse(
+            np.any(np.all(frame == self.game.other_aircraft_color, axis=2))
+        )
+        self.assertIsNotNone(airport_pixel)
+        x, y = airport_pixel
+        self.assertEqual(tuple(frame[y, x]), (0, 0, 0))
 
     def test_ticker_identifies_closest_aircraft_and_includes_route(self) -> None:
         with self.game._data_lock:
@@ -221,6 +261,7 @@ class FlightRadarGameTests(unittest.TestCase):
     def test_renders_rail_line_and_trains(self) -> None:
         synthetic_line = {"A": ((33.0, -112.0), (33.0, -111.95))}
         with patch("games.flight_radar.LINE_GEOMETRY", synthetic_line):
+            self.game.reset()  # -> westbound_eta; rail only draws off aircraft mode
             with self.game._data_lock:
                 self.game._trains = (
                     Train("1", "A", 0, 33.0, -111.98),
@@ -243,6 +284,7 @@ class FlightRadarGameTests(unittest.TestCase):
     def test_train_position_snaps_onto_its_line(self) -> None:
         synthetic_line = {"A": ((33.0, -112.0), (33.0, -111.9))}
         with patch("games.flight_radar.LINE_GEOMETRY", synthetic_line):
+            self.game.reset()  # -> westbound_eta; rail only draws off aircraft mode
             with self.game._data_lock:
                 # 1.2nm north of the (perfectly flat) line.
                 self.game._trains = (Train("1", "A", 0, 33.02, -111.95),)
@@ -261,6 +303,7 @@ class FlightRadarGameTests(unittest.TestCase):
     def test_draw_trains_extrapolates_by_fix_age_not_just_poll_elapsed(self) -> None:
         synthetic_line = {"A": ((33.0, -112.0), (33.0, -111.9))}
         with patch("games.flight_radar.LINE_GEOMETRY", synthetic_line):
+            self.game.reset()  # -> westbound_eta; rail only draws off aircraft mode
             with self.game._data_lock:
                 # Fix was already 5s old when we polled it; snapshot_time is
                 # "now" so elapsed-since-poll is ~0. If extrapolation only
@@ -336,6 +379,7 @@ class FlightRadarGameTests(unittest.TestCase):
         self.assertEqual(velocities, {})
 
     def test_stale_train_snapshot_hides_trains(self) -> None:
+        self.game.reset()  # -> westbound_eta; rail only draws off aircraft mode
         with self.game._data_lock:
             self.game._trains = (Train("1", "A", 0, 33.0, -111.98),)
             self.game._train_snapshot_time = (
