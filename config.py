@@ -13,6 +13,7 @@ class FlightRadarConfig:
     airport_latitude: float | None = None
     airport_longitude: float | None = None
     rail_api_url: str = "https://mna.mecatran.com/utw/ws/gtfsfeed/vehicles/valleymetro"
+    rail_trip_updates_url: str = "https://mna.mecatran.com/utw/ws/gtfsfeed/realtime/valleymetro"
     # Published in Phoenix's public open-data catalog for its GTFS-RT listings,
     # not a private credential: https://www.phoenixopendata.com/dataset/general-transit-feed-specification
     rail_api_key: str = "4f22263f69671d7f49726c3011333e527368211f"
@@ -76,6 +77,10 @@ class FlightRadarConfig:
             rail_api_url=os.getenv(
                 "CONWAY_RAIL_API_URL",
                 "https://mna.mecatran.com/utw/ws/gtfsfeed/vehicles/valleymetro",
+            ),
+            rail_trip_updates_url=os.getenv(
+                "CONWAY_RAIL_TRIP_UPDATES_URL",
+                "https://mna.mecatran.com/utw/ws/gtfsfeed/realtime/valleymetro",
             ),
             rail_api_key=os.getenv(
                 "CONWAY_RAIL_API_KEY", "4f22263f69671d7f49726c3011333e527368211f"

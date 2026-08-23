@@ -8,6 +8,7 @@ from air_traffic.projection import (
     clip_segment_to_radius,
     nearest_point_on_polyline,
     offset_nautical_miles,
+    polyline_arc_length,
     project_offset,
     project_position,
 )
@@ -149,6 +150,20 @@ class NearestPointOnPolylineTests(unittest.TestCase):
     def test_picks_the_closer_of_two_segments(self) -> None:
         polyline = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)]
         self.assertEqual(nearest_point_on_polyline(9.0, 8.0, polyline), (10.0, 8.0))
+
+
+class PolylineArcLengthTests(unittest.TestCase):
+    def test_arc_length_along_a_single_segment(self) -> None:
+        polyline = [(0.0, 0.0), (10.0, 0.0)]
+        self.assertAlmostEqual(polyline_arc_length(4.0, 3.0, polyline), 4.0)
+
+    def test_arc_length_accumulates_across_segments(self) -> None:
+        polyline = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)]
+        self.assertAlmostEqual(polyline_arc_length(9.0, 8.0, polyline), 18.0)
+
+    def test_arc_length_clamps_past_the_endpoint(self) -> None:
+        polyline = [(0.0, 0.0), (10.0, 0.0)]
+        self.assertAlmostEqual(polyline_arc_length(15.0, 2.0, polyline), 10.0)
 
 
 class ClipSegmentToRadiusTests(unittest.TestCase):

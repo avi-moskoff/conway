@@ -3,6 +3,7 @@ import random
 from math import cos, radians, sin
 from threading import Event, Lock, Thread
 from time import monotonic
+from time import time as wall_clock_time
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -17,7 +18,14 @@ from air_traffic.projection import (
 )
 from config import FlightRadarConfig
 from games.base import Game
-from transit import DIRECTION_BY_ROUTE_AND_ID, LINE_GEOMETRY, Train, ValleyMetroClient
+from transit import (
+    DIRECTION_BY_ROUTE_AND_ID,
+    LINE_GEOMETRY,
+    StopArrival,
+    Train,
+    ValleyMetroClient,
+    nearest_station_stop_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,17 +37,20 @@ class FlightRadarGame(Game):
     ticker_height = 12
     maximum_position_age_seconds = 60.0
     rail_maximum_position_age_seconds = 90.0
+    rail_extrapolation_cap_seconds = 20.0
+    max_train_speed_nm_per_second = 0.015  # ~62mph, well above the ~40mph top speed
     stale_snapshot_seconds = 60.0
+    display_modes = ("aircraft", "westbound_eta", "eastbound_eta")
     route_ttl_seconds = 6 * 60 * 60
     missing_route_ttl_seconds = 15 * 60
     failed_route_ttl_seconds = 5 * 60
     featured_aircraft_color = (255, 230, 0)
     other_aircraft_color = (255, 255, 255)
-    airport_color = (0, 255, 190)
-    home_color = (140, 0, 220)
-    eastbound_train_color = (255, 120, 0)
-    westbound_train_color = (255, 0, 144)
-    rail_line_colors = {"A": (30, 144, 255), "S": (120, 255, 40)}
+    airport_color = (255, 0, 0)
+    home_color = (255, 0, 0)
+    eastbound_train_color = (40, 220, 60)
+    westbound_train_color = (180, 0, 230)
+    rail_line_color = (30, 144, 255)
 
     def __init__(
         self,
@@ -55,7 +66,13 @@ class FlightRadarGame(Game):
             config.api_url, api_key=config.api_key
         )
         self._rail_client = rail_client or ValleyMetroClient(
-            config.rail_api_url, config.rail_api_key
+            config.rail_api_url, config.rail_trip_updates_url, config.rail_api_key
+        )
+        self._eastbound_home_stop_id = nearest_station_stop_id(
+            config.home_latitude, config.home_longitude, 0
+        )
+        self._westbound_home_stop_id = nearest_station_stop_id(
+            config.home_latitude, config.home_longitude, 1
         )
         self._data_lock = Lock()
         self._active_event = Event()
@@ -69,11 +86,14 @@ class FlightRadarGame(Game):
         self._snapshot_time: float | None = None
         self._has_error = False
         self._trains: tuple[Train, ...] = ()
+        self._train_velocities: dict[str, tuple[float, float]] = {}
         self._train_snapshot_time: float | None = None
+        self._arrivals: tuple[StopArrival, ...] = ()
         self._has_rail_error = False
         self._last_label = ""
         self._scroll_offset = 0
         self._ticker_scrolls = False
+        self._display_mode_index = 0
         self._font = ImageFont.load_default(size=12)
 
     def activate(self) -> None:
@@ -112,6 +132,9 @@ class FlightRadarGame(Game):
         logger.info("Flight radar polling stopped")
 
     def reset(self) -> None:
+        self._display_mode_index = (self._display_mode_index + 1) % len(
+            self.display_modes
+        )
         self._scroll_offset = 0
         self._wake_event.set()
 
@@ -128,17 +151,47 @@ class FlightRadarGame(Game):
             snapshot_time = self._snapshot_time
             has_error = self._has_error
             trains = self._trains
+            train_velocities = self._train_velocities
             train_snapshot_time = self._train_snapshot_time
+            arrivals = self._arrivals
             has_rail_error = self._has_rail_error
 
         stale = snapshot_time is None or now - snapshot_time > self.stale_snapshot_seconds
+        rail_stale = (
+            train_snapshot_time is None
+            or now - train_snapshot_time > self.stale_snapshot_seconds
+        )
+        mode = self.display_modes[self._display_mode_index]
+
         radar_height = self.height - self.ticker_height - 1
         frame = np.zeros((self.height, self.width, 3), dtype=np.uint8)
         center_x, center_y = self.width // 2, radar_height // 2
+
+        arrival_selection: StopArrival | None = None
+        matched_train: Train | None = None
+        if mode != "aircraft" and not rail_stale:
+            direction = "west" if mode == "westbound_eta" else "east"
+            arrival_selection = self._next_arrival(arrivals, direction)
+            if arrival_selection is not None:
+                matched_train = next(
+                    (t for t in trains if t.trip_id == arrival_selection.trip_id), None
+                )
+        highlighted_vehicle_id = (
+            matched_train.vehicle_id if matched_train is not None else None
+        )
+
         self._draw_rail_lines(frame, radar_height)
         frame[center_y, center_x] = self.home_color
         self._draw_airport(frame, radar_height)
-        self._draw_trains(frame, radar_height, trains, train_snapshot_time, now)
+        self._draw_trains(
+            frame,
+            radar_height,
+            trains,
+            train_velocities,
+            train_snapshot_time,
+            now,
+            highlighted_vehicle_id,
+        )
 
         visible: list[tuple[float, Aircraft, tuple[int, int]]] = []
         if not stale:
@@ -169,22 +222,35 @@ class FlightRadarGame(Game):
                 )
                 visible.append((east * east + north * north, plane, point))
 
-        featured = min(visible, default=None, key=lambda item: item[0])
+        featured = (
+            min(visible, default=None, key=lambda item: item[0])
+            if mode == "aircraft"
+            else None
+        )
         for item in visible:
             x, y = item[2]
             frame[y, x] = self.other_aircraft_color
         if featured is not None:
             x, y = featured[2]
             frame[y, x] = self.featured_aircraft_color
-        if stale:
-            label = "NO SIGNAL"
-        elif featured is None:
-            label = "CLEAR SKY"
+
+        if mode == "aircraft":
+            if stale:
+                label = "NO SIGNAL"
+            elif featured is None:
+                label = "CLEAR SKY"
+            else:
+                plane = featured[1]
+                cached = routes.get(plane.callsign or "")
+                route_label = cached[0].label if cached and cached[0] else None
+                label = f"{plane.label} {route_label}" if route_label else plane.label
         else:
-            plane = featured[1]
-            cached = routes.get(plane.callsign or "")
-            route_label = cached[0].label if cached and cached[0] else None
-            label = f"{plane.label} {route_label}" if route_label else plane.label
+            direction_letter = "W" if mode == "westbound_eta" else "E"
+            if rail_stale:
+                label = "NO RAIL"
+            else:
+                label = self._train_eta_label(arrival_selection, direction_letter)
+
         if (has_error or has_rail_error) and not stale:
             frame[0, 0] = (255, 0, 0)
         self._draw_ticker(frame, label)
@@ -210,7 +276,10 @@ class FlightRadarGame(Game):
 
     def _draw_rail_lines(self, frame: np.ndarray, radar_height: int) -> None:
         radius_nm = self._config.radius_nm
-        for route_id, points in LINE_GEOMETRY.items():
+        canvas = Image.new("1", (self.width, radar_height), 0)
+        draw = ImageDraw.Draw(canvas)
+        drawn = False
+        for points in LINE_GEOMETRY.values():
             offsets = [
                 offset_nautical_miles(
                     latitude,
@@ -220,9 +289,6 @@ class FlightRadarGame(Game):
                 )
                 for latitude, longitude in points
             ]
-            canvas = Image.new("1", (self.width, radar_height), 0)
-            draw = ImageDraw.Draw(canvas)
-            drawn = False
             for (east1, north1), (east2, north2) in zip(offsets, offsets[1:]):
                 clipped = clip_segment_to_radius(east1, north1, east2, north2, radius_nm)
                 if clipped is None:
@@ -232,23 +298,30 @@ class FlightRadarGame(Game):
                 end = project_offset(ce2, cn2, radius_nm, self.width, radar_height)
                 draw.line([start, end], fill=1)
                 drawn = True
-            if not drawn:
-                continue
-            mask = np.asarray(list(canvas.get_flattened_data()), dtype=np.uint8)
-            mask = mask.reshape(radar_height, self.width) != 0
-            frame[:radar_height][mask] = self.rail_line_colors[route_id]
+        if not drawn:
+            return
+        mask = np.asarray(list(canvas.get_flattened_data()), dtype=np.uint8)
+        mask = mask.reshape(radar_height, self.width) != 0
+        frame[:radar_height][mask] = self.rail_line_color
 
     def _draw_trains(
         self,
         frame: np.ndarray,
         radar_height: int,
         trains: tuple[Train, ...],
+        velocities: dict[str, tuple[float, float]],
         snapshot_time: float | None,
         now: float,
+        highlighted_vehicle_id: str | None = None,
     ) -> None:
         if snapshot_time is None or now - snapshot_time > self.stale_snapshot_seconds:
             return
         elapsed = now - snapshot_time
+        # Valley Metro's feed only reports a new GPS fix every ~15-20s with no
+        # speed field, so we derive velocity from consecutive fixes (see
+        # _estimate_velocities) and dead-reckon between polls. Capped so a
+        # stalled poll can't extrapolate a train off into nowhere.
+        extrapolation_seconds = min(self.rail_extrapolation_cap_seconds, elapsed)
         radius_nm = self._config.radius_nm
         line_offsets = {
             route_id: [
@@ -276,6 +349,9 @@ class FlightRadarGame(Game):
                 self._config.home_latitude,
                 self._config.home_longitude,
             )
+            east_speed, north_speed = velocities.get(train.vehicle_id, (0.0, 0.0))
+            east += east_speed * extrapolation_seconds
+            north += north_speed * extrapolation_seconds
             if east * east + north * north > radius_nm * radius_nm:
                 continue
             offsets = line_offsets.get(train.route_id)
@@ -284,11 +360,49 @@ class FlightRadarGame(Game):
                 # track geometry; snapping keeps trains visually on the line.
                 east, north = nearest_point_on_polyline(east, north, offsets)
             x, y = project_offset(east, north, radius_nm, self.width, radar_height)
-            frame[y, x] = (
-                self.eastbound_train_color
-                if direction == "east"
-                else self.westbound_train_color
-            )
+            if train.vehicle_id == highlighted_vehicle_id:
+                frame[y, x] = self.featured_aircraft_color
+            else:
+                frame[y, x] = (
+                    self.eastbound_train_color
+                    if direction == "east"
+                    else self.westbound_train_color
+                )
+
+    def _next_arrival(
+        self, arrivals: tuple[StopArrival, ...], direction: str
+    ) -> StopArrival | None:
+        """Pick the soonest not-yet-arrived StopArrival at home's A Line platform.
+
+        This is Valley Metro's own predicted arrival time for that specific
+        stop (schedule plus live delay), not something we derive from
+        position or speed - so a train stopped at a station doesn't produce
+        a misleadingly large ETA the way distance/speed extrapolation would.
+        """
+        stop_id = (
+            self._eastbound_home_stop_id
+            if direction == "east"
+            else self._westbound_home_stop_id
+        )
+        if stop_id is None:
+            return None
+        now = wall_clock_time()
+        candidates = [
+            arrival
+            for arrival in arrivals
+            if arrival.stop_id == stop_id and arrival.arrival_epoch >= now
+        ]
+        return min(candidates, default=None, key=lambda arrival: arrival.arrival_epoch)
+
+    def _train_eta_label(
+        self, arrival: StopArrival | None, direction_letter: str
+    ) -> str:
+        if arrival is None:
+            return f"{direction_letter} ETA --"
+        eta_seconds = max(0.0, arrival.arrival_epoch - wall_clock_time())
+        if eta_seconds < 60:
+            return f"{direction_letter} ETA <1M"
+        return f"{direction_letter} ETA {round(eta_seconds / 60)}M"
 
     def _poll_loop(self) -> None:
         failures = 0
@@ -340,11 +454,27 @@ class FlightRadarGame(Game):
                 continue
             try:
                 trains = self._rail_client.active_trains(LINE_GEOMETRY)
+                home_stop_ids = {
+                    stop_id
+                    for stop_id in (
+                        self._eastbound_home_stop_id,
+                        self._westbound_home_stop_id,
+                    )
+                    if stop_id is not None
+                }
+                arrivals = self._rail_client.arrivals_for_stops(home_stop_ids)
+                poll_time = monotonic()
                 with self._data_lock:
+                    self._train_velocities = self._estimate_velocities(trains, poll_time)
                     self._trains = trains
-                    self._train_snapshot_time = monotonic()
+                    self._train_snapshot_time = poll_time
+                    self._arrivals = arrivals
                     self._has_rail_error = False
-                logger.debug("Valley Metro poll received %d trains", len(trains))
+                logger.debug(
+                    "Valley Metro poll received %d trains, %d arrivals",
+                    len(trains),
+                    len(arrivals),
+                )
                 failures = 0
                 wait_seconds = self._config.rail_poll_seconds
             except Exception as error:
@@ -359,6 +489,48 @@ class FlightRadarGame(Game):
     def _mark_rail_error(self) -> None:
         with self._data_lock:
             self._has_rail_error = True
+
+    def _estimate_velocities(
+        self, new_trains: tuple[Train, ...], poll_time: float
+    ) -> dict[str, tuple[float, float]]:
+        """Derive per-train velocity from consecutive GPS fixes.
+
+        Must be called with _data_lock held and before self._trains /
+        self._train_snapshot_time are overwritten with new_trains / poll_time,
+        since it diffs against that previous snapshot. Valley Metro's feed
+        doesn't report speed, so this is the only source of motion we have.
+        """
+        previous_by_id = {train.vehicle_id: train for train in self._trains}
+        previous_poll_time = self._train_snapshot_time
+        velocities: dict[str, tuple[float, float]] = {}
+        if previous_poll_time is None:
+            return velocities
+        for train in new_trains:
+            previous = previous_by_id.get(train.vehicle_id)
+            if previous is None:
+                continue
+            old_fix_age = previous.seen_seconds + (poll_time - previous_poll_time)
+            time_between_fixes = old_fix_age - train.seen_seconds
+            if time_between_fixes < 1.0:
+                continue
+            new_east, new_north = offset_nautical_miles(
+                train.latitude,
+                train.longitude,
+                self._config.home_latitude,
+                self._config.home_longitude,
+            )
+            old_east, old_north = offset_nautical_miles(
+                previous.latitude,
+                previous.longitude,
+                self._config.home_latitude,
+                self._config.home_longitude,
+            )
+            east_speed = (new_east - old_east) / time_between_fixes
+            north_speed = (new_north - old_north) / time_between_fixes
+            if (east_speed**2 + north_speed**2) > self.max_train_speed_nm_per_second**2:
+                continue
+            velocities[train.vehicle_id] = (east_speed, north_speed)
+        return velocities
 
     def _update_routes(self, aircraft: tuple[Aircraft, ...]) -> None:
         now = monotonic()

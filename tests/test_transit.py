@@ -35,6 +35,7 @@ class ValleyMetroClientTests(unittest.TestCase):
         }
         client = ValleyMetroClient(
             "https://example.test/vehicles",
+            "https://example.test/realtime",
             "key",
             transport=lambda _request, _timeout: json.dumps(response).encode(),
         )
@@ -47,12 +48,14 @@ class ValleyMetroClientTests(unittest.TestCase):
         self.assertEqual(train.direction_id, 0)
         self.assertEqual(train.vehicle_id, "120")
         self.assertEqual(train.label, "Downtown Phoenix Hub")
+        self.assertEqual(train.trip_id, "1")
         self.assertAlmostEqual(train.seen_seconds, 5, delta=1)
 
     def test_ignores_malformed_entities(self) -> None:
         response = {"entity": [{"vehicle": {"trip": {"routeId": "A"}}}, "not-a-dict", {}]}
         client = ValleyMetroClient(
             "https://example.test/vehicles",
+            "https://example.test/realtime",
             "key",
             transport=lambda _request, _timeout: json.dumps(response).encode(),
         )
@@ -66,11 +69,77 @@ class ValleyMetroClientTests(unittest.TestCase):
             raise HTTPError("url", 500, "server error", {}, None)
 
         client = ValleyMetroClient(
-            "https://example.test/vehicles", "key", transport=failing_transport
+            "https://example.test/vehicles",
+            "https://example.test/realtime",
+            "key",
+            transport=failing_transport,
         )
 
         with self.assertRaises(ValleyMetroError):
             client.active_trains({"A"})
+
+    def test_parses_arrivals_for_requested_stops(self) -> None:
+        response = {
+            "header": {"gtfsRealtimeVersion": "2.0"},
+            "entity": [
+                {
+                    "id": "RT|1|1",
+                    "tripUpdate": {
+                        "trip": {"tripId": "1", "routeId": "A", "directionId": 0},
+                        "stopTimeUpdate": [
+                            {"stopId": "1111", "arrival": {"time": "1000", "delay": 0}},
+                            {"stopId": "9008", "arrival": {"time": "2000", "delay": 60}},
+                        ],
+                    },
+                },
+                {
+                    "id": "RT|2|2",
+                    "tripUpdate": {
+                        "trip": {"tripId": "2", "routeId": "A", "directionId": 1},
+                        "stopTimeUpdate": [
+                            {"stopId": "9036", "arrival": {"time": "1500", "delay": 0}},
+                        ],
+                    },
+                },
+                {
+                    "id": "RT|3|3",
+                    "tripUpdate": {
+                        "trip": {"tripId": "3", "routeId": "72"},
+                        "stopTimeUpdate": [
+                            {"stopId": "9008", "arrival": {"time": "999", "delay": 0}},
+                        ],
+                    },
+                },
+            ],
+        }
+        client = ValleyMetroClient(
+            "https://example.test/vehicles",
+            "https://example.test/realtime",
+            "key",
+            transport=lambda _request, _timeout: json.dumps(response).encode(),
+        )
+
+        arrivals = client.arrivals_for_stops({"9008", "9036"})
+
+        self.assertEqual(len(arrivals), 3)
+        by_trip = {arrival.trip_id: arrival for arrival in arrivals}
+        self.assertEqual(by_trip["1"].stop_id, "9008")
+        self.assertEqual(by_trip["1"].arrival_epoch, 2000.0)
+        self.assertEqual(by_trip["2"].stop_id, "9036")
+        self.assertEqual(by_trip["3"].route_id, "72")
+
+    def test_arrivals_for_no_stops_skips_request(self) -> None:
+        def unexpected_transport(_request, _timeout):
+            raise AssertionError("should not have made a request")
+
+        client = ValleyMetroClient(
+            "https://example.test/vehicles",
+            "https://example.test/realtime",
+            "key",
+            transport=unexpected_transport,
+        )
+
+        self.assertEqual(client.arrivals_for_stops(()), ())
 
 
 if __name__ == "__main__":

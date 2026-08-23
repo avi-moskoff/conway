@@ -1,15 +1,16 @@
 from threading import Event, Lock
-from time import monotonic, sleep
+from time import monotonic, sleep, time
 import unittest
 from unittest.mock import patch
 
 import numpy as np
+from PIL import Image, ImageDraw
 
 from air_traffic import AdsbLolError
 from air_traffic.models import Aircraft, FlightRoute
 from config import FlightRadarConfig
 from games.flight_radar import FlightRadarGame
-from transit.models import Train
+from transit.models import StopArrival, Train
 
 
 class FakeClient:
@@ -57,6 +58,9 @@ class FakeRailClient:
         with self._lock:
             self.calls += 1
         self.called.set()
+        return ()
+
+    def arrivals_for_stops(self, _stop_ids):
         return ()
 
 
@@ -199,7 +203,7 @@ class FlightRadarGameTests(unittest.TestCase):
             frame = self.game.frame
 
         self.assertTrue(
-            np.any(np.all(frame == self.game.rail_line_colors["A"], axis=2))
+            np.any(np.all(frame == self.game.rail_line_color, axis=2))
         )
         self.assertTrue(
             np.any(np.all(frame == self.game.eastbound_train_color, axis=2))
@@ -226,6 +230,38 @@ class FlightRadarGameTests(unittest.TestCase):
         home_row //= 2
         self.assertEqual(train_rows[0][0], home_row)
 
+    def test_estimate_velocities_derives_speed_from_consecutive_fixes(self) -> None:
+        old_poll_time = monotonic() - 10
+        with self.game._data_lock:
+            self.game._trains = (Train("1", "A", 0, 33.0, -112.0, seen_seconds=5.0),)
+            self.game._train_snapshot_time = old_poll_time
+
+        new_train = Train("1", "A", 0, 33.0, -111.99769, seen_seconds=2.0)
+        velocities = self.game._estimate_velocities((new_train,), old_poll_time + 20)
+
+        east_speed, north_speed = velocities["1"]
+        self.assertAlmostEqual(north_speed, 0.0, places=4)
+        self.assertGreater(east_speed, 0)
+        self.assertLess(east_speed, self.game.max_train_speed_nm_per_second)
+
+    def test_estimate_velocities_rejects_implausible_speed(self) -> None:
+        old_poll_time = monotonic() - 10
+        with self.game._data_lock:
+            self.game._trains = (Train("1", "A", 0, 33.0, -112.0, seen_seconds=1.0),)
+            self.game._train_snapshot_time = old_poll_time
+
+        new_train = Train("1", "A", 0, 33.0, -111.9, seen_seconds=1.0)
+        velocities = self.game._estimate_velocities((new_train,), old_poll_time + 11)
+
+        self.assertNotIn("1", velocities)
+
+    def test_estimate_velocities_ignores_trains_without_a_prior_poll(self) -> None:
+        velocities = self.game._estimate_velocities(
+            (Train("9", "A", 0, 33.0, -112.0),), monotonic()
+        )
+
+        self.assertEqual(velocities, {})
+
     def test_stale_train_snapshot_hides_trains(self) -> None:
         with self.game._data_lock:
             self.game._trains = (Train("1", "A", 0, 33.0, -111.98),)
@@ -238,6 +274,106 @@ class FlightRadarGameTests(unittest.TestCase):
         self.assertFalse(
             np.any(np.all(frame == self.game.eastbound_train_color, axis=2))
         )
+
+    def test_reset_cycles_display_mode_and_wraps(self) -> None:
+        self.assertEqual(self.game.display_modes[self.game._display_mode_index], "aircraft")
+
+        self.game.reset()
+        self.assertEqual(
+            self.game.display_modes[self.game._display_mode_index], "westbound_eta"
+        )
+
+        self.game.reset()
+        self.assertEqual(
+            self.game.display_modes[self.game._display_mode_index], "eastbound_eta"
+        )
+
+        self.game.reset()
+        self.assertEqual(self.game.display_modes[self.game._display_mode_index], "aircraft")
+
+    def test_next_arrival_picks_soonest_upcoming(self) -> None:
+        stop_id = self.game._westbound_home_stop_id
+        now = time()
+        arrivals = (
+            StopArrival("later", "A", 1, stop_id, now + 600),
+            StopArrival("sooner", "A", 1, stop_id, now + 120),
+            StopArrival("already-left", "A", 1, stop_id, now - 30),
+        )
+
+        selection = self.game._next_arrival(arrivals, "west")
+
+        self.assertIsNotNone(selection)
+        self.assertEqual(selection.trip_id, "sooner")
+
+    def test_next_arrival_ignores_other_stops(self) -> None:
+        now = time()
+        arrivals = (StopArrival("wrong-stop", "A", 1, "not-home", now + 60),)
+
+        selection = self.game._next_arrival(arrivals, "west")
+
+        self.assertIsNone(selection)
+
+    def test_train_eta_label_formatting(self) -> None:
+        now = time()
+
+        self.assertEqual(self.game._train_eta_label(None, "W"), "W ETA --")
+        self.assertEqual(
+            self.game._train_eta_label(StopArrival("1", "A", 1, "9036", now + 30), "W"),
+            "W ETA <1M",
+        )
+        self.assertEqual(
+            self.game._train_eta_label(StopArrival("1", "A", 1, "9036", now + 185), "W"),
+            "W ETA 3M",
+        )
+
+    def test_train_eta_label_fits_without_scrolling(self) -> None:
+        canvas = Image.new("1", (self.game.width, self.game.ticker_height), 0)
+        draw = ImageDraw.Draw(canvas)
+        now = time()
+
+        for label in (
+            self.game._train_eta_label(None, "W"),
+            self.game._train_eta_label(StopArrival("1", "A", 1, "9036", now + 30), "W"),
+            self.game._train_eta_label(StopArrival("1", "A", 1, "9036", now + 18 * 60), "W"),
+            self.game._train_eta_label(StopArrival("1", "A", 0, "9008", now + 18 * 60), "E"),
+        ):
+            width = draw.textlength(label, font=self.game._font)
+            self.assertLessEqual(width, self.game.width, label)
+
+    def test_frame_highlights_selected_train_and_shows_eta_ticker(self) -> None:
+        self.game.reset()  # -> westbound_eta
+        stop_id = self.game._westbound_home_stop_id
+        with self.game._data_lock:
+            self.game._trains = (
+                Train("W1", "A", 1, 33.0, -111.95, seen_seconds=0.0, trip_id="trip-1"),
+            )
+            self.game._train_snapshot_time = monotonic()
+            self.game._arrivals = (
+                StopArrival("trip-1", "A", 1, stop_id, time() + 300),
+            )
+
+        frame = self.game.frame
+
+        self.assertTrue(
+            np.any(np.all(frame == self.game.featured_aircraft_color, axis=2))
+        )
+        self.assertFalse(
+            np.any(np.all(frame == self.game.westbound_train_color, axis=2))
+        )
+        self.assertIn("ETA", self.game._last_label)
+
+    def test_frame_shows_eta_ticker_even_without_a_matched_vehicle(self) -> None:
+        self.game.reset()  # -> westbound_eta
+        stop_id = self.game._westbound_home_stop_id
+        with self.game._data_lock:
+            self.game._train_snapshot_time = monotonic()
+            self.game._arrivals = (
+                StopArrival("unseen-trip", "A", 1, stop_id, time() + 300),
+            )
+
+        self.game.frame
+
+        self.assertEqual(self.game._last_label, "W ETA 5M")
 
     def test_rail_polling_pauses_and_restarts_with_lifecycle(self) -> None:
         self.game.activate()

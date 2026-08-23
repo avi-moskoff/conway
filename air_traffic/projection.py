@@ -45,15 +45,18 @@ def project_position(
     return project_offset(east, north, radius_nm, width, height)
 
 
-def nearest_point_on_polyline(
+def _project_onto_polyline(
     east: float, north: float, polyline: list[tuple[float, float]]
-) -> tuple[float, float]:
-    """Return the closest point on a connected polyline to an east/north offset."""
-    best: tuple[float, float] | None = None
+) -> tuple[tuple[float, float], float]:
+    """Return the closest point on a polyline and its distance along the path from polyline[0]."""
+    cumulative = 0.0
+    best_point = (east, north)
+    best_arc_length = 0.0
     best_distance_sq = float("inf")
     for (e1, n1), (e2, n2) in zip(polyline, polyline[1:]):
         dx, dy = e2 - e1, n2 - n1
         length_sq = dx * dx + dy * dy
+        segment_length = length_sq**0.5
         if length_sq == 0:
             t = 0.0
         else:
@@ -62,10 +65,26 @@ def nearest_point_on_polyline(
         distance_sq = (east - point[0]) ** 2 + (north - point[1]) ** 2
         if distance_sq < best_distance_sq:
             best_distance_sq = distance_sq
-            best = point
-    if best is None:
-        return east, north
-    return best
+            best_point = point
+            best_arc_length = cumulative + segment_length * t
+        cumulative += segment_length
+    return best_point, best_arc_length
+
+
+def nearest_point_on_polyline(
+    east: float, north: float, polyline: list[tuple[float, float]]
+) -> tuple[float, float]:
+    """Return the closest point on a connected polyline to an east/north offset."""
+    point, _ = _project_onto_polyline(east, north, polyline)
+    return point
+
+
+def polyline_arc_length(
+    east: float, north: float, polyline: list[tuple[float, float]]
+) -> float:
+    """Return the distance along the polyline (from polyline[0]) to the point closest to (east, north)."""
+    _, arc_length = _project_onto_polyline(east, north, polyline)
+    return arc_length
 
 
 def clip_segment_to_radius(

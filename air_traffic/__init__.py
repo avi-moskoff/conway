@@ -4,6 +4,7 @@ from air_traffic.projection import (
     clip_segment_to_radius,
     nearest_point_on_polyline,
     offset_nautical_miles,
+    polyline_arc_length,
     project_offset,
     project_position,
 )
@@ -17,6 +18,7 @@ __all__ = [
     "clip_segment_to_radius",
     "nearest_point_on_polyline",
     "offset_nautical_miles",
+    "polyline_arc_length",
     "project_offset",
     "project_position",
 ]
