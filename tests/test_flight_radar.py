@@ -1,6 +1,7 @@
 from threading import Event, Lock
 from time import monotonic, sleep
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
@@ -8,6 +9,7 @@ from air_traffic import AdsbLolError
 from air_traffic.models import Aircraft, FlightRoute
 from config import FlightRadarConfig
 from games.flight_radar import FlightRadarGame
+from transit.models import Train
 
 
 class FakeClient:
@@ -45,9 +47,23 @@ class FakeClient:
         return self.routes
 
 
+class FakeRailClient:
+    def __init__(self) -> None:
+        self.calls = 0
+        self.called = Event()
+        self._lock = Lock()
+
+    def active_trains(self, _route_ids):
+        with self._lock:
+            self.calls += 1
+        self.called.set()
+        return ()
+
+
 class FlightRadarGameTests(unittest.TestCase):
     def setUp(self) -> None:
         self.client = FakeClient()
+        self.rail_client = FakeRailClient()
         self.game = FlightRadarGame(
             64,
             64,
@@ -55,10 +71,12 @@ class FlightRadarGameTests(unittest.TestCase):
                 33.0,
                 -112.0,
                 poll_seconds=0.05,
+                rail_poll_seconds=0.05,
                 airport_latitude=33.05,
                 airport_longitude=-112.0,
             ),
             client=self.client,
+            rail_client=self.rail_client,
         )
 
     def tearDown(self) -> None:
@@ -167,6 +185,68 @@ class FlightRadarGameTests(unittest.TestCase):
         self.game.activate()
         self.assertTrue(self.client.called.wait(1))
         self.assertGreater(self.client.calls, calls_while_paused)
+
+    def test_renders_rail_line_and_trains(self) -> None:
+        synthetic_line = {"A": ((33.0, -112.0), (33.0, -111.95))}
+        with patch("games.flight_radar.LINE_GEOMETRY", synthetic_line):
+            with self.game._data_lock:
+                self.game._trains = (
+                    Train("1", "A", 0, 33.0, -111.98),
+                    Train("2", "A", 1, 33.02, -112.0),
+                )
+                self.game._train_snapshot_time = monotonic()
+
+            frame = self.game.frame
+
+        self.assertTrue(
+            np.any(np.all(frame == self.game.rail_line_colors["A"], axis=2))
+        )
+        self.assertTrue(
+            np.any(np.all(frame == self.game.eastbound_train_color, axis=2))
+        )
+        self.assertTrue(
+            np.any(np.all(frame == self.game.westbound_train_color, axis=2))
+        )
+
+    def test_train_position_snaps_onto_its_line(self) -> None:
+        synthetic_line = {"A": ((33.0, -112.0), (33.0, -111.9))}
+        with patch("games.flight_radar.LINE_GEOMETRY", synthetic_line):
+            with self.game._data_lock:
+                # 1.2nm north of the (perfectly flat) line.
+                self.game._trains = (Train("1", "A", 0, 33.02, -111.95),)
+                self.game._train_snapshot_time = monotonic()
+
+            frame = self.game.frame
+
+        train_rows = np.argwhere(
+            np.all(frame == self.game.eastbound_train_color, axis=2)
+        )
+        self.assertEqual(len(train_rows), 1)
+        home_row = self.game.height - self.game.ticker_height - 1
+        home_row //= 2
+        self.assertEqual(train_rows[0][0], home_row)
+
+    def test_stale_train_snapshot_hides_trains(self) -> None:
+        with self.game._data_lock:
+            self.game._trains = (Train("1", "A", 0, 33.0, -111.98),)
+            self.game._train_snapshot_time = (
+                monotonic() - self.game.stale_snapshot_seconds - 5
+            )
+
+        frame = self.game.frame
+
+        self.assertFalse(
+            np.any(np.all(frame == self.game.eastbound_train_color, axis=2))
+        )
+
+    def test_rail_polling_pauses_and_restarts_with_lifecycle(self) -> None:
+        self.game.activate()
+        self.assertTrue(self.rail_client.called.wait(1))
+        self.game.deactivate()
+        sleep(0.1)
+        calls_while_paused = self.rail_client.calls
+        sleep(0.15)
+        self.assertEqual(self.rail_client.calls, calls_while_paused)
 
 
 if __name__ == "__main__":

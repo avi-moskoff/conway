@@ -4,7 +4,13 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 
 from air_traffic.adsb_lol import AdsbLolClient, RateLimitedError
-from air_traffic.projection import project_position
+from air_traffic.projection import (
+    clip_segment_to_radius,
+    nearest_point_on_polyline,
+    offset_nautical_miles,
+    project_offset,
+    project_position,
+)
 from config import FlightRadarConfig
 
 
@@ -122,6 +128,41 @@ class ProjectionTests(unittest.TestCase):
         self.assertIsNone(
             project_position(34.0, -112.0, 33.0, -112.0, 8, 64, 55)
         )
+
+    def test_project_offset_matches_project_position(self) -> None:
+        east, north = offset_nautical_miles(33.05, -111.9, 33.0, -112.0)
+        self.assertEqual(
+            project_offset(east, north, 10, 64, 55),
+            project_position(33.05, -111.9, 33.0, -112.0, 10, 64, 55),
+        )
+
+
+class NearestPointOnPolylineTests(unittest.TestCase):
+    def test_snaps_perpendicular_offset_onto_a_segment(self) -> None:
+        polyline = [(0.0, 0.0), (10.0, 0.0)]
+        self.assertEqual(nearest_point_on_polyline(4.0, 3.0, polyline), (4.0, 0.0))
+
+    def test_clamps_to_nearest_endpoint_past_the_line(self) -> None:
+        polyline = [(0.0, 0.0), (10.0, 0.0)]
+        self.assertEqual(nearest_point_on_polyline(15.0, 2.0, polyline), (10.0, 0.0))
+
+    def test_picks_the_closer_of_two_segments(self) -> None:
+        polyline = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)]
+        self.assertEqual(nearest_point_on_polyline(9.0, 8.0, polyline), (10.0, 8.0))
+
+
+class ClipSegmentToRadiusTests(unittest.TestCase):
+    def test_segment_entirely_inside_is_unchanged(self) -> None:
+        self.assertEqual(
+            clip_segment_to_radius(1.0, 1.0, 2.0, 2.0, 10.0), (1.0, 1.0, 2.0, 2.0)
+        )
+
+    def test_segment_entirely_outside_is_none(self) -> None:
+        self.assertIsNone(clip_segment_to_radius(20.0, 20.0, 25.0, 25.0, 10.0))
+
+    def test_segment_crossing_boundary_is_clipped_to_radius(self) -> None:
+        clipped = clip_segment_to_radius(0.0, 0.0, 20.0, 0.0, 10.0)
+        self.assertEqual(clipped, (0.0, 0.0, 10.0, 0.0))
 
 
 class ConfigurationTests(unittest.TestCase):

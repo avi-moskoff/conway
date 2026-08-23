@@ -12,6 +12,11 @@ class FlightRadarConfig:
     api_key: str | None = None
     airport_latitude: float | None = None
     airport_longitude: float | None = None
+    rail_api_url: str = "https://mna.mecatran.com/utw/ws/gtfsfeed/vehicles/valleymetro"
+    # Published in Phoenix's public open-data catalog for its GTFS-RT listings,
+    # not a private credential: https://www.phoenixopendata.com/dataset/general-transit-feed-specification
+    rail_api_key: str = "4f22263f69671d7f49726c3011333e527368211f"
+    rail_poll_seconds: float = 15.0
 
     @classmethod
     def from_environment(cls) -> "FlightRadarConfig | None":
@@ -43,6 +48,7 @@ class FlightRadarConfig:
             )
             radius = float(os.getenv("CONWAY_FLIGHT_RADIUS_NM", "8"))
             poll_seconds = float(os.getenv("CONWAY_ADSB_POLL_SECONDS", "15"))
+            rail_poll_seconds = float(os.getenv("CONWAY_RAIL_POLL_SECONDS", "15"))
         except ValueError as error:
             raise ValueError("Flight radar configuration must contain numbers") from error
         if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
@@ -55,6 +61,8 @@ class FlightRadarConfig:
             raise ValueError("CONWAY_FLIGHT_RADIUS_NM must be between 1 and 250")
         if poll_seconds < 5:
             raise ValueError("CONWAY_ADSB_POLL_SECONDS must be at least 5")
+        if rail_poll_seconds < 5:
+            raise ValueError("CONWAY_RAIL_POLL_SECONDS must be at least 5")
 
         return cls(
             home_latitude=latitude,
@@ -65,4 +73,12 @@ class FlightRadarConfig:
             poll_seconds=poll_seconds,
             api_url=os.getenv("CONWAY_ADSB_API_URL", "https://api.adsb.lol"),
             api_key=os.getenv("CONWAY_ADSB_API_KEY") or None,
+            rail_api_url=os.getenv(
+                "CONWAY_RAIL_API_URL",
+                "https://mna.mecatran.com/utw/ws/gtfsfeed/vehicles/valleymetro",
+            ),
+            rail_api_key=os.getenv(
+                "CONWAY_RAIL_API_KEY", "4f22263f69671d7f49726c3011333e527368211f"
+            ),
+            rail_poll_seconds=rail_poll_seconds,
         )
