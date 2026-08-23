@@ -121,6 +121,37 @@ class FlightRadarGameTests(unittest.TestCase):
             np.any(np.all(frame == self.game.eastbound_train_color, axis=2))
         )
 
+    def test_error_flag_only_reflects_the_active_modes_feed(self) -> None:
+        # An ADS-B error shows in aircraft mode...
+        with self.game._data_lock:
+            self.game._has_error = True
+            self.game._snapshot_time = monotonic()
+
+        self.assertEqual(tuple(self.game.frame[0, 0]), self.game.error_color)
+
+        # ...but not in a train mode, where it's irrelevant.
+        self.game.reset()  # -> westbound_eta
+        with self.game._data_lock:
+            self.game._train_snapshot_time = monotonic()
+
+        self.assertEqual(tuple(self.game.frame[0, 0]), (0, 0, 0))
+
+        # And a rail error shows in that train mode...
+        with self.game._data_lock:
+            self.game._has_rail_error = True
+
+        self.assertEqual(tuple(self.game.frame[0, 0]), self.game.error_color)
+
+        # ...but not back in aircraft mode (whose own error was never set
+        # here - it's still True from the first assertion above, so clear
+        # it to isolate what this check is actually about: a rail error
+        # shouldn't leak into aircraft mode's flag).
+        with self.game._data_lock:
+            self.game._has_error = False
+        self.game.reset()
+        self.game.reset()  # -> aircraft
+        self.assertEqual(tuple(self.game.frame[0, 0]), (0, 0, 0))
+
     def test_train_mode_hides_aircraft_and_airport(self) -> None:
         # airport_color == home_color, so checking the frame for that color
         # can't tell the two apart; check the airport's own pixel instead.
@@ -246,6 +277,43 @@ class FlightRadarGameTests(unittest.TestCase):
         self.game._update_routes(aircraft)
 
         self.assertEqual(self.client.route_calls, 1)
+
+    def test_exponential_backoff_grows_with_consecutive_failures(self) -> None:
+        # Jittered +/-20%, so compare non-overlapping ranges to be robust.
+        first = self.game._exponential_backoff_seconds(1, 15.0)
+        third = self.game._exponential_backoff_seconds(3, 15.0)
+
+        self.assertLess(first, 15.0 * 2 * 1.2)
+        self.assertGreater(third, 15.0 * 4)
+
+    def test_exponential_backoff_caps_at_five_minutes(self) -> None:
+        wait_seconds = self.game._exponential_backoff_seconds(20, 15.0)
+
+        self.assertLessEqual(wait_seconds, 5 * 60.0 * 1.2)
+
+    def test_rate_limited_wait_escalates_instead_of_trusting_a_short_retry_after(
+        self,
+    ) -> None:
+        # A short Retry-After (as adsb.lol was observed sending repeatedly)
+        # shouldn't be trusted literally on a second consecutive failure -
+        # that's what produced a burst of retries a couple seconds apart.
+        # Use a realistic poll_seconds; self.game's is shrunk for fast tests.
+        game = FlightRadarGame(
+            64, 64, FlightRadarConfig(33.0, -112.0, poll_seconds=15.0)
+        )
+        try:
+            first_failure = game._rate_limited_wait_seconds(1, 2.0)
+            third_failure = game._rate_limited_wait_seconds(3, 2.0)
+        finally:
+            game.close()
+
+        self.assertGreater(first_failure, 2.0)
+        self.assertGreater(third_failure, first_failure)
+
+    def test_rate_limited_wait_still_honors_a_long_retry_after(self) -> None:
+        wait_seconds = self.game._rate_limited_wait_seconds(1, 500.0)
+
+        self.assertGreaterEqual(wait_seconds, 500.0)
 
     def test_polling_pauses_and_restarts_with_lifecycle(self) -> None:
         self.game.activate()

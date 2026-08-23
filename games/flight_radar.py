@@ -267,7 +267,12 @@ class FlightRadarGame(Game):
                     else self.eastbound_train_color
                 )
 
-        if (has_error or has_rail_error) and not stale:
+        # Only flag an error for the feed this mode actually displays -
+        # an ADS-B hiccup has no business lighting up a train view.
+        if mode == "aircraft":
+            if has_error and not stale:
+                frame[0, 0] = self.error_color
+        elif has_rail_error and not rail_stale:
             frame[0, 0] = self.error_color
         self._draw_ticker(frame, label, letter_color)
         return frame
@@ -459,22 +464,44 @@ class FlightRadarGame(Game):
             except RateLimitedError as error:
                 failures += 1
                 self._mark_error()
-                logger.warning("Flight radar rate limited; backing off")
-                wait_seconds = error.retry_after_seconds or max(
-                    60.0, self._config.poll_seconds * 4
+                logger.warning(
+                    "Flight radar rate limited (retry_after=%s); backing off",
+                    error.retry_after_seconds,
+                )
+                wait_seconds = self._rate_limited_wait_seconds(
+                    failures, error.retry_after_seconds
                 )
             except Exception as error:
                 failures += 1
                 self._mark_error()
                 logger.warning("Flight radar poll failed: %s", error)
-                exponential = self._config.poll_seconds * (2 ** min(failures, 5))
-                wait_seconds = min(5 * 60.0, exponential) * random.uniform(0.8, 1.2)
+                wait_seconds = self._exponential_backoff_seconds(
+                    failures, self._config.poll_seconds
+                )
             self._wake_event.wait(wait_seconds)
             self._wake_event.clear()
 
     def _mark_error(self) -> None:
         with self._data_lock:
             self._has_error = True
+
+    @staticmethod
+    def _exponential_backoff_seconds(failures: int, base_poll_seconds: float) -> float:
+        exponential = base_poll_seconds * (2 ** min(failures, 5))
+        return min(5 * 60.0, exponential) * random.uniform(0.8, 1.2)
+
+    def _rate_limited_wait_seconds(
+        self, failures: int, retry_after_seconds: float | None
+    ) -> float:
+        # A short server-provided Retry-After doesn't mean the limit actually
+        # clears that fast - trusting it literally on every consecutive
+        # failure just re-hits adsb.lol every couple of seconds. Escalate
+        # like any other failure, but still honor a longer Retry-After if
+        # the server asks for one.
+        return max(
+            self._exponential_backoff_seconds(failures, self._config.poll_seconds),
+            retry_after_seconds or 0.0,
+        )
 
     def _rail_poll_loop(self) -> None:
         failures = 0
@@ -512,8 +539,9 @@ class FlightRadarGame(Game):
                 failures += 1
                 self._mark_rail_error()
                 logger.warning("Valley Metro poll failed: %s", error)
-                exponential = self._config.rail_poll_seconds * (2 ** min(failures, 5))
-                wait_seconds = min(5 * 60.0, exponential) * random.uniform(0.8, 1.2)
+                wait_seconds = self._exponential_backoff_seconds(
+                    failures, self._config.rail_poll_seconds
+                )
             self._rail_wake_event.wait(wait_seconds)
             self._rail_wake_event.clear()
 
