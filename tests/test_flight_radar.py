@@ -139,6 +139,32 @@ class FlightRadarGameTests(unittest.TestCase):
 
         self.assertEqual(colors, {(0, 0, 0), self.game.featured_aircraft_color})
 
+    def test_ticker_colors_direction_letter_and_keeps_rest_yellow(self) -> None:
+        frame = np.zeros((self.game.height, self.game.width, 3), dtype=np.uint8)
+        self.game._draw_ticker(frame, "W ETA 8M", self.game.westbound_train_color)
+
+        ticker = frame[-self.game.ticker_height :]
+        colors = {tuple(color) for color in ticker.reshape(-1, 3)}
+        self.assertEqual(
+            colors,
+            {(0, 0, 0), self.game.westbound_train_color, self.game.featured_aircraft_color},
+        )
+        letter_cols = np.argwhere(
+            np.all(ticker == self.game.westbound_train_color, axis=2)
+        )[:, 1]
+        rest_cols = np.argwhere(
+            np.all(ticker == self.game.featured_aircraft_color, axis=2)
+        )[:, 1]
+        self.assertLess(letter_cols.max(), rest_cols.min())
+
+    def test_ticker_without_letter_color_stays_all_yellow(self) -> None:
+        frame = np.zeros((self.game.height, self.game.width, 3), dtype=np.uint8)
+        self.game._draw_ticker(frame, "CLEAR SKY")
+
+        ticker = frame[-self.game.ticker_height :]
+        colors = {tuple(color) for color in ticker.reshape(-1, 3)}
+        self.assertEqual(colors, {(0, 0, 0), self.game.featured_aircraft_color})
+
     def test_long_ticker_scrolls(self) -> None:
         with self.game._data_lock:
             self.game._aircraft = self.client.nearby_aircraft(0, 0, 0)
@@ -230,6 +256,28 @@ class FlightRadarGameTests(unittest.TestCase):
         home_row //= 2
         self.assertEqual(train_rows[0][0], home_row)
 
+    def test_draw_trains_extrapolates_by_fix_age_not_just_poll_elapsed(self) -> None:
+        synthetic_line = {"A": ((33.0, -112.0), (33.0, -111.9))}
+        with patch("games.flight_radar.LINE_GEOMETRY", synthetic_line):
+            with self.game._data_lock:
+                # Fix was already 5s old when we polled it; snapshot_time is
+                # "now" so elapsed-since-poll is ~0. If extrapolation only
+                # used elapsed-since-poll this train would appear frozen.
+                self.game._trains = (
+                    Train("1", "A", 0, 33.0, -112.0, seen_seconds=20.0),
+                )
+                self.game._train_velocities = {"1": (0.02, 0.0)}
+                self.game._train_snapshot_time = monotonic()
+
+            frame = self.game.frame
+
+        train_pixels = np.argwhere(
+            np.all(frame == self.game.eastbound_train_color, axis=2)
+        )
+        self.assertEqual(len(train_pixels), 1)
+        home_col = self.game.width // 2
+        self.assertGreater(train_pixels[0][1], home_col)
+
     def test_estimate_velocities_derives_speed_from_consecutive_fixes(self) -> None:
         old_poll_time = monotonic() - 10
         with self.game._data_lock:
@@ -259,6 +307,29 @@ class FlightRadarGameTests(unittest.TestCase):
         velocities = self.game._estimate_velocities(
             (Train("9", "A", 0, 33.0, -112.0),), monotonic()
         )
+
+        self.assertEqual(velocities, {})
+
+    def test_estimate_velocities_preserves_velocity_when_fix_is_unchanged(self) -> None:
+        # The underlying feed often repeats the exact same fix across a poll
+        # or two; a repeated fix shouldn't erase a previously good estimate.
+        with self.game._data_lock:
+            self.game._trains = (Train("1", "A", 0, 33.0, -112.0, seen_seconds=1.0),)
+            self.game._train_snapshot_time = monotonic() - 30
+            self.game._train_velocities = {"1": (0.004, 0.0)}
+
+        # Same position, age simply grew by the elapsed time: no new fix.
+        repeated = Train("1", "A", 0, 33.0, -112.0, seen_seconds=31.0)
+        velocities = self.game._estimate_velocities((repeated,), monotonic())
+
+        self.assertEqual(velocities["1"], (0.004, 0.0))
+
+    def test_estimate_velocities_prunes_vehicles_no_longer_present(self) -> None:
+        with self.game._data_lock:
+            self.game._train_velocities = {"gone": (0.004, 0.0)}
+            self.game._train_snapshot_time = monotonic()
+
+        velocities = self.game._estimate_velocities((), monotonic())
 
         self.assertEqual(velocities, {})
 
@@ -353,12 +424,13 @@ class FlightRadarGameTests(unittest.TestCase):
             )
 
         frame = self.game.frame
+        radar = frame[: -self.game.ticker_height]
 
         self.assertTrue(
             np.any(np.all(frame == self.game.featured_aircraft_color, axis=2))
         )
         self.assertFalse(
-            np.any(np.all(frame == self.game.westbound_train_color, axis=2))
+            np.any(np.all(radar == self.game.westbound_train_color, axis=2))
         )
         self.assertIn("ETA", self.game._last_label)
 

@@ -234,6 +234,7 @@ class FlightRadarGame(Game):
             x, y = featured[2]
             frame[y, x] = self.featured_aircraft_color
 
+        letter_color = None
         if mode == "aircraft":
             if stale:
                 label = "NO SIGNAL"
@@ -250,10 +251,15 @@ class FlightRadarGame(Game):
                 label = "NO RAIL"
             else:
                 label = self._train_eta_label(arrival_selection, direction_letter)
+                letter_color = (
+                    self.westbound_train_color
+                    if mode == "westbound_eta"
+                    else self.eastbound_train_color
+                )
 
         if (has_error or has_rail_error) and not stale:
             frame[0, 0] = (255, 0, 0)
-        self._draw_ticker(frame, label)
+        self._draw_ticker(frame, label, letter_color)
         return frame
 
     def _draw_airport(self, frame: np.ndarray, radar_height: int) -> None:
@@ -276,6 +282,15 @@ class FlightRadarGame(Game):
 
     def _draw_rail_lines(self, frame: np.ndarray, radar_height: int) -> None:
         radius_nm = self._config.radius_nm
+        # Home is rarely exactly on a track's latitude/longitude, so the
+        # visible radius (a circle in real-world terms) doesn't reach the
+        # rectangular frame's corners - clipping tracks to the true radius
+        # can cut a line off well short of the edge. Clip to a wider radius
+        # instead (a corner is at most radius_nm * sqrt(2) away) and keep
+        # projecting at the real radius_nm, so project_offset's existing
+        # clamp pins the line at the frame edge rather than mid-frame. Trains
+        # and everything else still only render within the true radius.
+        clip_radius_nm = radius_nm * 1.5
         canvas = Image.new("1", (self.width, radar_height), 0)
         draw = ImageDraw.Draw(canvas)
         drawn = False
@@ -290,7 +305,9 @@ class FlightRadarGame(Game):
                 for latitude, longitude in points
             ]
             for (east1, north1), (east2, north2) in zip(offsets, offsets[1:]):
-                clipped = clip_segment_to_radius(east1, north1, east2, north2, radius_nm)
+                clipped = clip_segment_to_radius(
+                    east1, north1, east2, north2, clip_radius_nm
+                )
                 if clipped is None:
                     continue
                 ce1, cn1, ce2, cn2 = clipped
@@ -317,11 +334,6 @@ class FlightRadarGame(Game):
         if snapshot_time is None or now - snapshot_time > self.stale_snapshot_seconds:
             return
         elapsed = now - snapshot_time
-        # Valley Metro's feed only reports a new GPS fix every ~15-20s with no
-        # speed field, so we derive velocity from consecutive fixes (see
-        # _estimate_velocities) and dead-reckon between polls. Capped so a
-        # stalled poll can't extrapolate a train off into nowhere.
-        extrapolation_seconds = min(self.rail_extrapolation_cap_seconds, elapsed)
         radius_nm = self._config.radius_nm
         line_offsets = {
             route_id: [
@@ -349,9 +361,18 @@ class FlightRadarGame(Game):
                 self._config.home_latitude,
                 self._config.home_longitude,
             )
+            # Extrapolate from how old this specific fix actually is (age at
+            # fetch time plus time since we fetched it), not from our poll
+            # cadence. A fix that's been sitting unchanged across several
+            # polls still ages continuously this way instead of freezing and
+            # then jumping once a genuinely new fix finally arrives. Capped
+            # so a long gap without a new fix can't extrapolate indefinitely.
+            fix_age = min(
+                self.rail_extrapolation_cap_seconds, train.seen_seconds + elapsed
+            )
             east_speed, north_speed = velocities.get(train.vehicle_id, (0.0, 0.0))
-            east += east_speed * extrapolation_seconds
-            north += north_speed * extrapolation_seconds
+            east += east_speed * fix_age
+            north += north_speed * fix_age
             if east * east + north * north > radius_nm * radius_nm:
                 continue
             offsets = line_offsets.get(train.route_id)
@@ -499,10 +520,22 @@ class FlightRadarGame(Game):
         self._train_snapshot_time are overwritten with new_trains / poll_time,
         since it diffs against that previous snapshot. Valley Metro's feed
         doesn't report speed, so this is the only source of motion we have.
+
+        The underlying feed only actually refreshes a given vehicle's fix
+        every ~15-20s, so plenty of polls see the exact same fix repeated.
+        When that happens we keep the previously estimated velocity rather
+        than dropping it - otherwise a vehicle would visibly freeze on every
+        poll that didn't happen to catch a new fix, then jump once one
+        finally arrived. Vehicles no longer present are pruned.
         """
         previous_by_id = {train.vehicle_id: train for train in self._trains}
         previous_poll_time = self._train_snapshot_time
-        velocities: dict[str, tuple[float, float]] = {}
+        current_ids = {train.vehicle_id for train in new_trains}
+        velocities: dict[str, tuple[float, float]] = {
+            vehicle_id: velocity
+            for vehicle_id, velocity in self._train_velocities.items()
+            if vehicle_id in current_ids
+        }
         if previous_poll_time is None:
             return velocities
         for train in new_trains:
@@ -628,7 +661,12 @@ class FlightRadarGame(Game):
         longitude = plane.longitude + east / longitude_scale
         return latitude, longitude
 
-    def _draw_ticker(self, frame: np.ndarray, label: str) -> None:
+    def _draw_ticker(
+        self,
+        frame: np.ndarray,
+        label: str,
+        letter_color: tuple[int, int, int] | None = None,
+    ) -> None:
         if label != self._last_label:
             self._scroll_offset = 0
         self._last_label = label
@@ -636,21 +674,33 @@ class FlightRadarGame(Game):
         draw = ImageDraw.Draw(canvas)
         text_width = int(draw.textlength(label, font=self._font))
         self._ticker_scrolls = text_width > self.width
+
+        # letter_color acts as a direction legend: the first character (e.g.
+        # "W"/"E") is drawn on its own canvas so it can be colored to match
+        # that direction's train color, while the rest stays the usual color.
+        letter_canvas = None
+        letter_draw = None
+        if letter_color is not None and label:
+            letter_canvas = Image.new("1", (self.width, self.ticker_height), 0)
+            letter_draw = ImageDraw.Draw(letter_canvas)
+
+        def draw_label(x: float) -> None:
+            if letter_draw is not None:
+                letter, rest = label[0], label[1:]
+                letter_draw.text((x, -1), letter, fill=1, font=self._font)
+                letter_width = draw.textlength(letter, font=self._font)
+                draw.text((x + letter_width, -1), rest, fill=1, font=self._font)
+            else:
+                draw.text((x, -1), label, fill=1, font=self._font)
+
         if self._ticker_scrolls:
             cycle_width = text_width + 8
             x = -(self._scroll_offset % cycle_width)
-            draw.text(
-                (x, -1), label, fill=1, font=self._font
-            )
-            draw.text(
-                (x + cycle_width, -1),
-                label,
-                fill=1,
-                font=self._font,
-            )
+            draw_label(x)
+            draw_label(x + cycle_width)
         else:
             x = (self.width - text_width) // 2
-            draw.text((x, -1), label, fill=1, font=self._font)
+            draw_label(x)
         # Avoid Pillow's Image.__array_interface__, which goes through
         # Image.tobytes() and unnecessarily requires the optional ImageFile
         # module on the minimal Raspberry Pi installation.
@@ -659,3 +709,9 @@ class FlightRadarGame(Game):
         ticker = frame[-self.ticker_height :]
         ticker[:] = 0
         ticker[mask] = self.featured_aircraft_color
+        if letter_canvas is not None:
+            letter_mask = np.asarray(
+                list(letter_canvas.get_flattened_data()), dtype=np.uint8
+            )
+            letter_mask = letter_mask.reshape(self.ticker_height, self.width) != 0
+            ticker[letter_mask] = letter_color

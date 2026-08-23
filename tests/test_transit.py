@@ -64,6 +64,33 @@ class ValleyMetroClientTests(unittest.TestCase):
 
         self.assertEqual(trains, ())
 
+    def test_rejects_null_island_as_a_missing_fix(self) -> None:
+        # Observed live: the feed occasionally emits (0, 0) - thousands of
+        # miles from Phoenix - in place of a vehicle's real position.
+        response = {
+            "entity": [
+                {
+                    "id": "RTVP:T:1",
+                    "vehicle": {
+                        "trip": {"tripId": "1", "routeId": "A", "directionId": 0},
+                        "position": {"latitude": 0.0, "longitude": 0.0},
+                        "timestamp": str(int(time.time())),
+                        "vehicle": {"id": "130", "label": "Downtown Phoenix Hub"},
+                    },
+                }
+            ]
+        }
+        client = ValleyMetroClient(
+            "https://example.test/vehicles",
+            "https://example.test/realtime",
+            "key",
+            transport=lambda _request, _timeout: json.dumps(response).encode(),
+        )
+
+        trains = client.active_trains({"A"})
+
+        self.assertEqual(trains, ())
+
     def test_http_error_raises_valley_metro_error(self) -> None:
         def failing_transport(_request, _timeout):
             raise HTTPError("url", 500, "server error", {}, None)

@@ -97,6 +97,11 @@ class ValleyMetroClient:
             longitude = float(position["longitude"])
             if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
                 return None
+            # (0, 0) is "null island" - nowhere near Phoenix, and the feed
+            # has been observed to emit it as a sentinel when a vehicle's
+            # real fix isn't available rather than omitting the position.
+            if latitude == 0.0 and longitude == 0.0:
+                return None
         except (KeyError, TypeError, ValueError):
             return None
 
