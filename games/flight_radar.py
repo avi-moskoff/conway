@@ -55,6 +55,7 @@ class FlightRadarGame(Game):
     eastbound_train_color = (0, 255, 0)
     westbound_train_color = (255, 230, 0)
     rail_line_color = (0, 0, 255)
+    ticker_text_color = (255, 255, 255)
 
     def __init__(
         self,
@@ -184,14 +185,18 @@ class FlightRadarGame(Game):
             matched_train.vehicle_id if matched_train is not None else None
         )
 
-        frame[center_y, center_x] = self.home_color
         # Aircraft and rail traffic are never drawn together - keeping each
         # mode to its own set of colors means nothing needs to be distinct
-        # from a category that isn't even on screen.
+        # from a category that isn't even on screen. Home is drawn after the
+        # line/airport (home is often right on the A Line, and the line's
+        # mask-based fill would otherwise paint over it) but before trains,
+        # so a train can still cover it if exactly coincident.
         if mode == "aircraft":
             self._draw_airport(frame, radar_height)
+            frame[center_y, center_x] = self.home_color
         else:
             self._draw_rail_lines(frame, radar_height)
+            frame[center_y, center_x] = self.home_color
             self._draw_trains(
                 frame,
                 radar_height,
@@ -713,7 +718,7 @@ class FlightRadarGame(Game):
         mask = mask.reshape(self.ticker_height, self.width) != 0
         ticker = frame[-self.ticker_height :]
         ticker[:] = 0
-        ticker[mask] = self.featured_aircraft_color
+        ticker[mask] = self.ticker_text_color
         if letter_canvas is not None:
             letter_mask = np.asarray(
                 list(letter_canvas.get_flattened_data()), dtype=np.uint8

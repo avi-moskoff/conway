@@ -136,9 +136,12 @@ class FlightRadarGameTests(unittest.TestCase):
             self.game._snapshot_time = monotonic()
 
         frame = self.game.frame
+        radar = frame[: -self.game.ticker_height]
 
+        # other_aircraft_color == ticker_text_color (both white), so check
+        # only the radar area - the ticker legitimately renders white text.
         self.assertFalse(
-            np.any(np.all(frame == self.game.other_aircraft_color, axis=2))
+            np.any(np.all(radar == self.game.other_aircraft_color, axis=2))
         )
         self.assertIsNotNone(airport_pixel)
         x, y = airport_pixel
@@ -179,9 +182,9 @@ class FlightRadarGameTests(unittest.TestCase):
         ticker = self.game.frame[-self.game.ticker_height :]
         colors = {tuple(color) for color in ticker.reshape(-1, 3)}
 
-        self.assertEqual(colors, {(0, 0, 0), self.game.featured_aircraft_color})
+        self.assertEqual(colors, {(0, 0, 0), self.game.ticker_text_color})
 
-    def test_ticker_colors_direction_letter_and_keeps_rest_yellow(self) -> None:
+    def test_ticker_colors_direction_letter_and_keeps_rest_white(self) -> None:
         frame = np.zeros((self.game.height, self.game.width, 3), dtype=np.uint8)
         self.game._draw_ticker(frame, "W ETA 8M", self.game.westbound_train_color)
 
@@ -189,23 +192,23 @@ class FlightRadarGameTests(unittest.TestCase):
         colors = {tuple(color) for color in ticker.reshape(-1, 3)}
         self.assertEqual(
             colors,
-            {(0, 0, 0), self.game.westbound_train_color, self.game.featured_aircraft_color},
+            {(0, 0, 0), self.game.westbound_train_color, self.game.ticker_text_color},
         )
         letter_cols = np.argwhere(
             np.all(ticker == self.game.westbound_train_color, axis=2)
         )[:, 1]
         rest_cols = np.argwhere(
-            np.all(ticker == self.game.featured_aircraft_color, axis=2)
+            np.all(ticker == self.game.ticker_text_color, axis=2)
         )[:, 1]
         self.assertLess(letter_cols.max(), rest_cols.min())
 
-    def test_ticker_without_letter_color_stays_all_yellow(self) -> None:
+    def test_ticker_without_letter_color_stays_all_white(self) -> None:
         frame = np.zeros((self.game.height, self.game.width, 3), dtype=np.uint8)
         self.game._draw_ticker(frame, "CLEAR SKY")
 
         ticker = frame[-self.game.ticker_height :]
         colors = {tuple(color) for color in ticker.reshape(-1, 3)}
-        self.assertEqual(colors, {(0, 0, 0), self.game.featured_aircraft_color})
+        self.assertEqual(colors, {(0, 0, 0), self.game.ticker_text_color})
 
     def test_long_ticker_scrolls(self) -> None:
         with self.game._data_lock:
