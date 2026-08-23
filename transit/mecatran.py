@@ -14,6 +14,15 @@ class ValleyMetroError(RuntimeError):
     pass
 
 
+# Generous bounding box around the entire Valley Metro service area (greater
+# Phoenix). The feed has been observed to emit (0, 0) - "null island",
+# thousands of miles away - as a sentinel when a vehicle's real fix isn't
+# available rather than omitting the position; anything outside this box is
+# equally bogus for this system, not just that one specific sentinel value.
+_SERVICE_AREA_LATITUDE_RANGE = (32.0, 34.5)
+_SERVICE_AREA_LONGITUDE_RANGE = (-113.0, -110.5)
+
+
 def _default_transport(request: Request, timeout: float) -> bytes:
     with urlopen(request, timeout=timeout) as response:
         return response.read()
@@ -95,12 +104,12 @@ class ValleyMetroClient:
         try:
             latitude = float(position["latitude"])
             longitude = float(position["longitude"])
-            if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
-                return None
-            # (0, 0) is "null island" - nowhere near Phoenix, and the feed
-            # has been observed to emit it as a sentinel when a vehicle's
-            # real fix isn't available rather than omitting the position.
-            if latitude == 0.0 and longitude == 0.0:
+            if not (
+                _SERVICE_AREA_LATITUDE_RANGE[0] <= latitude <= _SERVICE_AREA_LATITUDE_RANGE[1]
+                and _SERVICE_AREA_LONGITUDE_RANGE[0]
+                <= longitude
+                <= _SERVICE_AREA_LONGITUDE_RANGE[1]
+            ):
                 return None
         except (KeyError, TypeError, ValueError):
             return None
@@ -144,6 +153,8 @@ class ValleyMetroClient:
         trip_id = trip.get("tripId")
         route_id = trip.get("routeId")
         if trip_id is None or route_id is None:
+            return []
+        if trip.get("scheduleRelationship") == "CANCELED":
             return []
         try:
             direction_id = int(trip.get("directionId"))

@@ -91,6 +91,34 @@ class ValleyMetroClientTests(unittest.TestCase):
 
         self.assertEqual(trains, ())
 
+    def test_rejects_any_fix_outside_the_service_area(self) -> None:
+        # A position doesn't have to be exactly (0, 0) to be bogus - any fix
+        # far outside greater Phoenix is equally not a real Valley Metro
+        # vehicle location.
+        response = {
+            "entity": [
+                {
+                    "id": "RTVP:T:1",
+                    "vehicle": {
+                        "trip": {"tripId": "1", "routeId": "A", "directionId": 0},
+                        "position": {"latitude": 40.7128, "longitude": -74.006},
+                        "timestamp": str(int(time.time())),
+                        "vehicle": {"id": "130", "label": "Downtown Phoenix Hub"},
+                    },
+                }
+            ]
+        }
+        client = ValleyMetroClient(
+            "https://example.test/vehicles",
+            "https://example.test/realtime",
+            "key",
+            transport=lambda _request, _timeout: json.dumps(response).encode(),
+        )
+
+        trains = client.active_trains({"A"})
+
+        self.assertEqual(trains, ())
+
     def test_http_error_raises_valley_metro_error(self) -> None:
         def failing_transport(_request, _timeout):
             raise HTTPError("url", 500, "server error", {}, None)
@@ -154,6 +182,36 @@ class ValleyMetroClientTests(unittest.TestCase):
         self.assertEqual(by_trip["1"].arrival_epoch, 2000.0)
         self.assertEqual(by_trip["2"].stop_id, "9036")
         self.assertEqual(by_trip["3"].route_id, "72")
+
+    def test_arrivals_skips_canceled_trips(self) -> None:
+        response = {
+            "entity": [
+                {
+                    "id": "RT|1|1",
+                    "tripUpdate": {
+                        "trip": {
+                            "tripId": "1",
+                            "routeId": "A",
+                            "directionId": 0,
+                            "scheduleRelationship": "CANCELED",
+                        },
+                        "stopTimeUpdate": [
+                            {"stopId": "9008", "arrival": {"time": "2000", "delay": 0}},
+                        ],
+                    },
+                },
+            ],
+        }
+        client = ValleyMetroClient(
+            "https://example.test/vehicles",
+            "https://example.test/realtime",
+            "key",
+            transport=lambda _request, _timeout: json.dumps(response).encode(),
+        )
+
+        arrivals = client.arrivals_for_stops({"9008"})
+
+        self.assertEqual(arrivals, ())
 
     def test_arrivals_for_no_stops_skips_request(self) -> None:
         def unexpected_transport(_request, _timeout):

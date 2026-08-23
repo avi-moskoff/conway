@@ -98,7 +98,9 @@ class FlightRadarGameTests(unittest.TestCase):
         self.assertTrue(
             np.any(np.all(frame == self.game.featured_aircraft_color, axis=2))
         )
-        self.assertTrue(np.any(np.all(frame == (255, 255, 255), axis=2)))
+        self.assertTrue(
+            np.any(np.all(frame == self.game.other_aircraft_color, axis=2))
+        )
         self.assertTrue(np.any(np.all(frame == self.game.airport_color, axis=2)))
         self.assertFalse(np.any(np.all(frame == (0, 192, 255), axis=2)))
 

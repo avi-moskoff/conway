@@ -44,13 +44,19 @@ class FlightRadarGame(Game):
     route_ttl_seconds = 6 * 60 * 60
     missing_route_ttl_seconds = 15 * 60
     failed_route_ttl_seconds = 5 * 60
+    # "Interest" - home, airport, error, and the currently featured/selected
+    # vehicle - all share one color. They're all either fixed single points
+    # or a one-at-a-time highlight, so position/context tells them apart;
+    # reserving green/red exclusively for east/west trains matters far more,
+    # since a train dot is identified by color alone as it rides the line.
     featured_aircraft_color = (255, 230, 0)
-    other_aircraft_color = (255, 255, 255)
-    airport_color = (255, 0, 0)
-    home_color = (255, 0, 0)
-    eastbound_train_color = (40, 220, 60)
-    westbound_train_color = (180, 0, 230)
-    rail_line_color = (30, 144, 255)
+    airport_color = (255, 230, 0)
+    home_color = (255, 230, 0)
+    error_color = (255, 230, 0)
+    other_aircraft_color = (150, 150, 150)
+    eastbound_train_color = (0, 255, 0)
+    westbound_train_color = (255, 0, 0)
+    rail_line_color = (0, 0, 255)
 
     def __init__(
         self,
@@ -258,7 +264,7 @@ class FlightRadarGame(Game):
                 )
 
         if (has_error or has_rail_error) and not stale:
-            frame[0, 0] = (255, 0, 0)
+            frame[0, 0] = self.error_color
         self._draw_ticker(frame, label, letter_color)
         return frame
 
