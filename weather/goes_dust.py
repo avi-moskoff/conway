@@ -1,6 +1,7 @@
 import io
 import logging
 import socket
+import threading
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from http.client import HTTPSConnection
@@ -13,6 +14,16 @@ from PIL import Image
 logger = logging.getLogger(__name__)
 
 Transport = Callable[[Request, float], bytes]
+
+# Serializes access to PIL's JPEG decoder across threads. Observed directly:
+# the exact same bytes (matched by size and timestamp) decoded successfully
+# in a single-threaded manual test but failed every time inside the
+# multi-threaded service, which also has the main render loop calling into
+# PIL (ticker drawing) many times a second - consistent with the underlying
+# decoder not being safely reentrant across threads on this platform, rather
+# than anything wrong with the fetched data itself. games/weather_radar.py's
+# final decode of the same bytes in _store_dust also takes this lock.
+decode_lock = threading.Lock()
 
 
 class GoesDustError(RuntimeError):
@@ -219,7 +230,7 @@ class GoesDustClient:
         # with (not the lighter-weight verify()), so "validated OK" here
         # can't diverge from "actually usable" there.
         try:
-            with Image.open(io.BytesIO(body)) as image:
+            with decode_lock, Image.open(io.BytesIO(body)) as image:
                 image.load()
             return True
         except Exception:

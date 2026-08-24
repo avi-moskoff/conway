@@ -22,6 +22,7 @@ from weather import (
     WeatherSample,
     sector_pixel_for,
 )
+from weather.goes_dust import decode_lock
 
 logger = logging.getLogger(__name__)
 
@@ -416,13 +417,13 @@ class WeatherRadarGame(Game):
 
     def _store_dust(self, body: bytes, frame_time: datetime) -> None:
         try:
-            sector_image = Image.open(io.BytesIO(body)).convert("RGB")
+            # Shares weather.goes_dust's decode_lock: PIL's JPEG decoder
+            # isn't safely reentrant across threads on this platform, and
+            # this runs concurrently with the main render loop's own PIL
+            # calls (ticker drawing) many times a second.
+            with decode_lock:
+                sector_image = Image.open(io.BytesIO(body)).convert("RGB")
         except Exception as error:
-            # Whatever came back wasn't a decodable image - could be an ISP
-            # captive portal, a DNS blocklist intercepting the CDN host, or
-            # a truncated download. Surface enough of the response to tell
-            # those apart from the log line alone, since this environment
-            # can't see the Pi's network path directly.
             raise RuntimeError(
                 f"could not decode dust image ({len(body)} bytes, "
                 f"starts with {body[:40]!r})"
