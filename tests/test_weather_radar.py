@@ -1,10 +1,32 @@
+import io
 import unittest
+from datetime import datetime, timezone
 
 import numpy as np
+from PIL import Image
 
 from config import WeatherRadarConfig
 from games.weather_radar import WeatherRadarGame
 from weather.models import AirQualitySample, WeatherSample
+
+
+def _fake_sector_image_bytes(size: int = 1200, color=(120, 60, 10)) -> bytes:
+    image = Image.new("RGB", (size, size), color)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+class FakeGoesDustClient:
+    def __init__(self) -> None:
+        self.error: Exception | None = None
+        self.frame_time = datetime(2026, 8, 24, 3, 46, tzinfo=timezone.utc)
+        self.image_bytes = _fake_sector_image_bytes()
+
+    def latest_frame(self):
+        if self.error is not None:
+            raise self.error
+        return self.image_bytes, self.frame_time
 
 
 class FakeOpenMeteoClient:
@@ -44,14 +66,19 @@ class FakeOpenMeteoClient:
 class WeatherRadarGameTests(unittest.TestCase):
     def setUp(self) -> None:
         self.client = FakeOpenMeteoClient()
+        self.dust_client = FakeGoesDustClient()
         self.config = WeatherRadarConfig(
             33.0,
             -112.0,
             radius_nm=15.0,
             poll_seconds=0.05,
+            dust_radius_nm=40.0,
+            dust_poll_seconds=0.05,
             landmarks=(("Test Peak", 33.08, -111.92),),
         )
-        self.game = WeatherRadarGame(64, 64, self.config, client=self.client)
+        self.game = WeatherRadarGame(
+            64, 64, self.config, client=self.client, dust_client=self.dust_client
+        )
 
     def tearDown(self) -> None:
         self.game.close()
@@ -61,6 +88,8 @@ class WeatherRadarGameTests(unittest.TestCase):
         self.game._store_conditions(weather_samples)
         aqi_samples = self.client.air_quality_for(self.game._query_points)
         self.game._store_aqi(aqi_samples)
+        body, frame_time = self.dust_client.latest_frame()
+        self.game._store_dust(body, frame_time)
 
     def test_frame_shape_and_dtype(self) -> None:
         self._seed()
@@ -74,12 +103,14 @@ class WeatherRadarGameTests(unittest.TestCase):
         self.assertTrue(np.any(np.all(frame == self.game.home_color, axis=2)))
         self.assertTrue(np.any(np.all(frame == self.game.landmark_color, axis=2)))
 
-    def test_reset_cycles_conditions_and_aqi_and_wraps(self) -> None:
+    def test_reset_cycles_conditions_aqi_dust_and_wraps(self) -> None:
         self.assertEqual(
             self.game.display_modes[self.game._display_mode_index], "conditions"
         )
         self.game.reset()
         self.assertEqual(self.game.display_modes[self.game._display_mode_index], "aqi")
+        self.game.reset()
+        self.assertEqual(self.game.display_modes[self.game._display_mode_index], "dust")
         self.game.reset()
         self.assertEqual(
             self.game.display_modes[self.game._display_mode_index], "conditions"
@@ -108,6 +139,32 @@ class WeatherRadarGameTests(unittest.TestCase):
         self.game.reset()  # -> aqi
         self.game.frame
         self.assertEqual(self.game._last_label, "AQI 25 GOOD")
+
+    def test_dust_ticker_shows_seeded_label(self) -> None:
+        self._seed()
+        self.game.reset()  # -> aqi
+        self.game.reset()  # -> dust
+        self.game.frame
+        self.assertEqual(self.game._last_label, "DUST 03:46Z")
+
+    def test_dust_mode_renders_home_marker_and_landmark(self) -> None:
+        self._seed()
+        self.game.reset()  # -> aqi
+        self.game.reset()  # -> dust
+        frame = self.game.frame
+        self.assertTrue(np.any(np.all(frame == self.game.home_color, axis=2)))
+        self.assertTrue(np.any(np.all(frame == self.game.landmark_color, axis=2)))
+
+    def test_stale_dust_data_shows_no_signal(self) -> None:
+        self._seed()
+        self.game.reset()  # -> aqi
+        self.game.reset()  # -> dust
+        with self.game._data_lock:
+            self.game._dust_snapshot_time -= self.game.stale_snapshot_seconds + 1
+
+        self.game.frame
+
+        self.assertEqual(self.game._last_label, "NO SIGNAL")
 
     def test_aqi_category_at_breakpoints(self) -> None:
         self.assertEqual(self.game._aqi_category(50), "GOOD")

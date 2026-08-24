@@ -1,4 +1,6 @@
+import io
 import logging
+from datetime import datetime
 from threading import Event, Lock, Thread
 from time import monotonic
 
@@ -13,7 +15,13 @@ from air_traffic.projection import (
 )
 from config import WeatherRadarConfig
 from games.base import Game
-from weather import AirQualitySample, OpenMeteoClient, WeatherSample
+from weather import (
+    AirQualitySample,
+    GoesDustClient,
+    OpenMeteoClient,
+    WeatherSample,
+    sector_pixel_for,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -21,10 +29,14 @@ logger = logging.getLogger(__name__)
 class WeatherRadarGame(Game):
     """North-up map of weather conditions / air quality near the configured location."""
 
-    frame_delay_seconds = 1.0
+    # Nothing else about this game changes between polls (no extrapolated
+    # motion like flight radar's aircraft), but the ticker still needs a
+    # fast tick to scroll smoothly - match flight radar's cadence rather
+    # than a slower delay that would make long labels crawl.
+    frame_delay_seconds = 0.1
     ticker_height = 12
     stale_snapshot_seconds = 1800.0
-    display_modes = ("conditions", "aqi")
+    display_modes = ("conditions", "aqi", "dust")
     grid_size = 5
 
     home_color = (255, 0, 255)
@@ -86,17 +98,21 @@ class WeatherRadarGame(Game):
         width: int,
         config: WeatherRadarConfig,
         client: OpenMeteoClient | None = None,
+        dust_client: GoesDustClient | None = None,
     ) -> None:
         super().__init__(height, width)
         self._config = config
         self._client = client or OpenMeteoClient()
+        self._dust_client = dust_client or GoesDustClient(satellite=config.dust_satellite)
         self._radar_height = height - self.ticker_height - 1
 
         self._data_lock = Lock()
         self._active_event = Event()
         self._wake_event = Event()
+        self._dust_wake_event = Event()
         self._stop_event = Event()
         self._worker: Thread | None = None
+        self._dust_worker: Thread | None = None
 
         self._conditions_field: np.ndarray | None = None
         self._conditions_snapshot_time: float | None = None
@@ -108,6 +124,11 @@ class WeatherRadarGame(Game):
         self._has_aqi_error = False
         self._home_aqi_sample: AirQualitySample | None = None
 
+        self._dust_field: np.ndarray | None = None
+        self._dust_snapshot_time: float | None = None
+        self._has_dust_error = False
+        self._dust_frame_time: datetime | None = None
+
         self._display_mode_index = 0
         self._last_label = ""
         self._scroll_offset = 0
@@ -118,8 +139,14 @@ class WeatherRadarGame(Game):
             self.width - 1, 0, config.radius_nm, self.width, self._radar_height
         )
         self._query_points = self._build_query_points(max_east, max_north)
-        self._pixel_east, self._pixel_north = self._build_pixel_grid()
-        self._landmark_pixels = self._build_landmark_pixels()
+        self._pixel_east, self._pixel_north = self._build_pixel_grid(config.radius_nm)
+        self._landmark_pixels = self._build_landmark_pixels(config.radius_nm)
+
+        dust_pixel_east, dust_pixel_north = self._build_pixel_grid(config.dust_radius_nm)
+        self._dust_landmark_pixels = self._build_landmark_pixels(config.dust_radius_nm)
+        self._dust_sector_x, self._dust_sector_y = self._build_dust_sector_pixels(
+            dust_pixel_east, dust_pixel_north
+        )
 
     def _build_query_points(
         self, max_east: float, max_north: float
@@ -137,21 +164,19 @@ class WeatherRadarGame(Game):
             for east in east_steps
         )
 
-    def _build_pixel_grid(self) -> tuple[np.ndarray, np.ndarray]:
+    def _build_pixel_grid(self, radius_nm: float) -> tuple[np.ndarray, np.ndarray]:
         grid_x, grid_y = np.meshgrid(np.arange(self.width), np.arange(self._radar_height))
         vectorized = np.vectorize(pixel_to_offset, otypes=[float, float])
-        return vectorized(
-            grid_x, grid_y, self._config.radius_nm, self.width, self._radar_height
-        )
+        return vectorized(grid_x, grid_y, radius_nm, self.width, self._radar_height)
 
-    def _build_landmark_pixels(self) -> tuple[tuple[int, int], ...]:
+    def _build_landmark_pixels(self, radius_nm: float) -> tuple[tuple[int, int], ...]:
         points = (
             project_position(
                 latitude,
                 longitude,
                 self._config.home_latitude,
                 self._config.home_longitude,
-                self._config.radius_nm,
+                radius_nm,
                 self.width,
                 self._radar_height,
             )
@@ -159,27 +184,53 @@ class WeatherRadarGame(Game):
         )
         return tuple(point for point in points if point is not None)
 
+    def _build_dust_sector_pixels(
+        self, pixel_east: np.ndarray, pixel_north: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Precompute, once, which NOAA sector-image pixel each display pixel samples.
+
+        Static for the life of the game (depends only on home location and
+        dust_radius_nm, both fixed), so this runs once here rather than
+        once per dust poll.
+        """
+        vectorized_latlon = np.vectorize(offset_to_latlon, otypes=[float, float])
+        latitude, longitude = vectorized_latlon(
+            pixel_east, pixel_north, self._config.home_latitude, self._config.home_longitude
+        )
+        vectorized_sector = np.vectorize(sector_pixel_for, otypes=[float, float])
+        return vectorized_sector(latitude, longitude)
+
     def activate(self) -> None:
         if self._worker is None:
             self._worker = Thread(
                 target=self._poll_loop, name="weather-radar-poller", daemon=True
             )
             self._worker.start()
+        if self._dust_worker is None:
+            self._dust_worker = Thread(
+                target=self._dust_poll_loop, name="weather-radar-dust-poller", daemon=True
+            )
+            self._dust_worker.start()
         self._active_event.set()
         self._wake_event.set()
+        self._dust_wake_event.set()
         logger.info("Weather radar polling activated")
 
     def deactivate(self) -> None:
         self._active_event.clear()
         self._wake_event.set()
+        self._dust_wake_event.set()
         logger.info("Weather radar polling paused")
 
     def close(self) -> None:
         self._stop_event.set()
         self._active_event.set()
         self._wake_event.set()
+        self._dust_wake_event.set()
         if self._worker is not None:
             self._worker.join(timeout=11.0)
+        if self._dust_worker is not None:
+            self._dust_worker.join(timeout=11.0)
         logger.info("Weather radar polling stopped")
 
     def reset(self) -> None:
@@ -208,6 +259,10 @@ class WeatherRadarGame(Game):
             aqi_snapshot_time = self._aqi_snapshot_time
             has_aqi_error = self._has_aqi_error
             home_aqi_sample = self._home_aqi_sample
+            dust_field = self._dust_field
+            dust_snapshot_time = self._dust_snapshot_time
+            has_dust_error = self._has_dust_error
+            dust_frame_time = self._dust_frame_time
 
         frame = np.zeros((self.height, self.width, 3), dtype=np.uint8)
 
@@ -219,14 +274,23 @@ class WeatherRadarGame(Game):
                 "NO SIGNAL" if stale else self._conditions_label(home_weather_sample)
             )
             show_error = has_conditions_error and not stale
-        else:
+            landmark_pixels = self._landmark_pixels
+        elif mode == "aqi":
             stale = self._is_stale(aqi_snapshot_time, now)
             if not stale and aqi_field is not None:
                 frame[: self._radar_height] = aqi_field
             label = "NO SIGNAL" if stale else self._aqi_label(home_aqi_sample)
             show_error = has_aqi_error and not stale
+            landmark_pixels = self._landmark_pixels
+        else:
+            stale = self._is_stale(dust_snapshot_time, now)
+            if not stale and dust_field is not None:
+                frame[: self._radar_height] = dust_field
+            label = "NO SIGNAL" if stale else self._dust_label(dust_frame_time)
+            show_error = has_dust_error and not stale
+            landmark_pixels = self._dust_landmark_pixels
 
-        for x, y in self._landmark_pixels:
+        for x, y in landmark_pixels:
             frame[y, x] = self.landmark_color
         center_x, center_y = self.width // 2, self._radar_height // 2
         frame[center_y, center_x] = self.home_color
@@ -248,6 +312,11 @@ class WeatherRadarGame(Game):
         if sample is None:
             return "NO SIGNAL"
         return f"AQI {round(sample.us_aqi)} {self._aqi_category(sample.us_aqi)}"
+
+    def _dust_label(self, frame_time: datetime | None) -> str:
+        if frame_time is None:
+            return "NO SIGNAL"
+        return f"DUST {frame_time:%H:%M}Z"
 
     @staticmethod
     def _aqi_category(value: float) -> str:
@@ -303,6 +372,44 @@ class WeatherRadarGame(Game):
     @staticmethod
     def _exponential_backoff_seconds(failures: int, base_poll_seconds: float) -> float:
         return min(5 * 60.0, base_poll_seconds * (2 ** min(failures, 5)))
+
+    def _dust_poll_loop(self) -> None:
+        failures = 0
+        while not self._stop_event.is_set():
+            if not self._active_event.is_set():
+                self._dust_wake_event.wait()
+                self._dust_wake_event.clear()
+                continue
+            try:
+                result = self._dust_client.latest_frame()
+                if result is None:
+                    raise RuntimeError("no dust frame available")
+                body, frame_time = result
+                self._store_dust(body, frame_time)
+                failures = 0
+                wait_seconds = self._config.dust_poll_seconds
+            except Exception as error:
+                failures += 1
+                with self._data_lock:
+                    self._has_dust_error = True
+                logger.warning("Weather radar dust poll failed: %s", error)
+                wait_seconds = self._exponential_backoff_seconds(
+                    failures, self._config.dust_poll_seconds
+                )
+            self._dust_wake_event.wait(wait_seconds)
+            self._dust_wake_event.clear()
+
+    def _store_dust(self, body: bytes, frame_time: datetime) -> None:
+        sector_array = np.asarray(Image.open(io.BytesIO(body)).convert("RGB"))
+        size = sector_array.shape[0]
+        x = np.clip(np.rint(self._dust_sector_x).astype(int), 0, size - 1)
+        y = np.clip(np.rint(self._dust_sector_y).astype(int), 0, size - 1)
+        field = sector_array[y, x]
+        with self._data_lock:
+            self._dust_field = field
+            self._dust_snapshot_time = monotonic()
+            self._dust_frame_time = frame_time
+            self._has_dust_error = False
 
     def _store_conditions(self, samples: tuple[WeatherSample, ...]) -> None:
         easts, norths = self._offsets_for_samples(samples)

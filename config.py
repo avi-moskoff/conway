@@ -96,6 +96,9 @@ class WeatherRadarConfig:
     radius_nm: float = 15.0
     poll_seconds: float = 600.0
     landmarks: tuple[tuple[str, float, float], ...] = ()
+    dust_radius_nm: float = 40.0
+    dust_poll_seconds: float = 300.0
+    dust_satellite: str = "GOES19"
 
     @classmethod
     def from_environment(cls) -> "WeatherRadarConfig | None":
@@ -111,6 +114,8 @@ class WeatherRadarConfig:
             longitude = float(longitude_text)
             radius = float(os.getenv("CONWAY_WEATHER_RADIUS_NM", "15"))
             poll_seconds = float(os.getenv("CONWAY_WEATHER_POLL_SECONDS", "600"))
+            dust_radius = float(os.getenv("CONWAY_DUST_RADIUS_NM", "40"))
+            dust_poll_seconds = float(os.getenv("CONWAY_DUST_POLL_SECONDS", "300"))
         except ValueError as error:
             raise ValueError("Weather radar configuration must contain numbers") from error
         if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
@@ -119,6 +124,10 @@ class WeatherRadarConfig:
             raise ValueError("CONWAY_WEATHER_RADIUS_NM must be between 1 and 250")
         if poll_seconds < 60:
             raise ValueError("CONWAY_WEATHER_POLL_SECONDS must be at least 60")
+        if not 1 <= dust_radius <= 250:
+            raise ValueError("CONWAY_DUST_RADIUS_NM must be between 1 and 250")
+        if dust_poll_seconds < 60:
+            raise ValueError("CONWAY_DUST_POLL_SECONDS must be at least 60")
 
         return cls(
             home_latitude=latitude,
@@ -126,6 +135,9 @@ class WeatherRadarConfig:
             radius_nm=radius,
             poll_seconds=poll_seconds,
             landmarks=cls._parse_landmarks(os.getenv("CONWAY_WEATHER_LANDMARKS", "")),
+            dust_radius_nm=dust_radius,
+            dust_poll_seconds=dust_poll_seconds,
+            dust_satellite=os.getenv("CONWAY_DUST_SATELLITE", "GOES19"),
         )
 
     @staticmethod

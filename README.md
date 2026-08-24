@@ -196,21 +196,39 @@ The weather-radar game is included whenever the same `CONWAY_HOME_LATITUDE`/
 `CONWAY_HOME_LONGITUDE` are set. It samples a small grid of points around home
 and interpolates them into a continuous field, the same north-up scale as the
 flight radar. Press the reset button to cycle between current conditions
-(temperature and a black→blue→white precipitation field) and air quality (a
-green→yellow→orange→red→purple→maroon field on the EPA US AQI scale). A dim
-gray dot marks each configured landmark, giving the map a sense of scale; a
-bright center pixel marks home.
+(temperature and a black→blue→white precipitation field), air quality (a
+green→yellow→orange→red→purple→maroon field on the EPA US AQI scale), and a
+live GOES satellite Dust RGB crop (for watching a dust storm/haboob
+approach). A dim gray dot marks each configured landmark, giving the map a
+sense of scale; a bright center pixel marks home.
 
 ```text
 CONWAY_WEATHER_RADIUS_NM=15
 CONWAY_WEATHER_POLL_SECONDS=600
 CONWAY_WEATHER_LANDMARKS=Camelback Mountain:33.5205:-111.9648;South Mountain:33.3306:-112.0533
+CONWAY_DUST_RADIUS_NM=40
+CONWAY_DUST_POLL_SECONDS=300
+CONWAY_DUST_SATELLITE=GOES19
 ```
 
 `CONWAY_WEATHER_LANDMARKS` is optional and semicolon-separated, each entry
 formatted `Name:latitude:longitude`. All other settings are optional and fall
 back to the defaults shown above. Weather and air-quality data come from the
 free [Open-Meteo](https://open-meteo.com/) APIs, which need no API key.
+
+The dust view uses a larger default radius (`CONWAY_DUST_RADIUS_NM`) than the
+conditions/AQI views: its source imagery is coarser (roughly 1.2-1.4 km per
+pixel near the US Southwest) than the interpolated Open-Meteo fields, so a
+tighter radius would just look blocky. It's currently only calibrated for the
+"Southern Rockies" region (Arizona and nearby) - see the comment above the
+calibration constants in `weather/goes_dust.py` for how that calibration was
+derived and how to redo it for a different area. `CONWAY_DUST_SATELLITE`
+exists because GOES satellites occasionally get swapped out operationally
+(GOES-19 itself only became "GOES-East" in April 2025); if NOAA ever retires
+`GOES19` from that role, update this to whichever satellite replaces it and
+re-derive the calibration the same way - normal satellite station-keeping
+drift is far too small to matter, but an operational swap changes the image
+source entirely.
 
 Run the entry point with the permissions required by the RGB matrix driver:
 
@@ -262,6 +280,12 @@ This project displays live data from a few free, third-party APIs:
   The weather-radar game samples a small grid of points around the configured
   home location and interpolates/color-maps them for the LED matrix, rather
   than displaying the raw values.
+- GOES-19 Dust RGB satellite imagery from
+  [NOAA/NESDIS/STAR](https://www.star.nesdis.noaa.gov/GOES/), whose sector
+  JPEGs are published under [CC0-1.0](https://creativecommons.org/publicdomain/zero/1.0/)
+  (declared in the image files' own embedded metadata). The dust view crops
+  and reprojects a small region of that imagery around home for the LED
+  matrix, rather than displaying the raw sector image.
 
 ## License
 
