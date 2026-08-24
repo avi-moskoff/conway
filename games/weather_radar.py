@@ -505,24 +505,36 @@ class WeatherRadarGame(Game):
         if label != self._last_label:
             self._scroll_offset = 0
         self._last_label = label
-        canvas = Image.new("1", (self.width, self.ticker_height), 0)
-        draw = ImageDraw.Draw(canvas)
-        text_width = int(draw.textlength(label, font=self._font))
-        self._ticker_scrolls = text_width > self.width
+        # Shares decode_lock with the dust poller's JPEG decoding. This runs
+        # on the main render thread ~10x/second, and under this project's
+        # real-time/single-core scheduling (see run.sh: chrt -f 90 taskset
+        # -c 3 - a deliberate choice per the matrix library's own guidance,
+        # not incidental), Pillow's C extension calls from this thread and
+        # the dust poller thread were interleaving in ways that corrupted
+        # the dust poller's JPEG decodes - confirmed by testing that the
+        # exact same scheduling setup with no other threads competing does
+        # NOT reproduce the corruption, only the real multi-threaded service
+        # does. decode_lock alone (JPEG decode only) wasn't sufficient;
+        # ticker drawing needed to be included too.
+        with decode_lock:
+            canvas = Image.new("1", (self.width, self.ticker_height), 0)
+            draw = ImageDraw.Draw(canvas)
+            text_width = int(draw.textlength(label, font=self._font))
+            self._ticker_scrolls = text_width > self.width
 
-        if self._ticker_scrolls:
-            cycle_width = text_width + 8
-            x = -(self._scroll_offset % cycle_width)
-            draw.text((x, -1), label, fill=1, font=self._font)
-            draw.text((x + cycle_width, -1), label, fill=1, font=self._font)
-        else:
-            x = (self.width - text_width) // 2
-            draw.text((x, -1), label, fill=1, font=self._font)
+            if self._ticker_scrolls:
+                cycle_width = text_width + 8
+                x = -(self._scroll_offset % cycle_width)
+                draw.text((x, -1), label, fill=1, font=self._font)
+                draw.text((x + cycle_width, -1), label, fill=1, font=self._font)
+            else:
+                x = (self.width - text_width) // 2
+                draw.text((x, -1), label, fill=1, font=self._font)
 
-        # Avoid Pillow's Image.__array_interface__, which goes through
-        # Image.tobytes() and unnecessarily requires the optional ImageFile
-        # module on the minimal Raspberry Pi installation.
-        mask = np.asarray(list(canvas.get_flattened_data()), dtype=np.uint8)
+            # Avoid Pillow's Image.__array_interface__, which goes through
+            # Image.tobytes() and unnecessarily requires the optional
+            # ImageFile module on the minimal Raspberry Pi installation.
+            mask = np.asarray(list(canvas.get_flattened_data()), dtype=np.uint8)
         mask = mask.reshape(self.ticker_height, self.width) != 0
         ticker = frame[-self.ticker_height :]
         ticker[:] = 0
