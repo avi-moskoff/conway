@@ -8,6 +8,8 @@ from air_traffic.projection import (
     clip_segment_to_radius,
     nearest_point_on_polyline,
     offset_nautical_miles,
+    offset_to_latlon,
+    pixel_to_offset,
     polyline_arc_length,
     project_offset,
     project_position,
@@ -137,6 +139,50 @@ class ProjectionTests(unittest.TestCase):
             project_position(33.05, -111.9, 33.0, -112.0, 10, 64, 55),
         )
 
+    def test_short_axis_is_still_bounded_by_radius(self) -> None:
+        # height=55 < width=64, so north/south is the short axis: it should
+        # still cut off at exactly radius_nm, same as before this change.
+        latitude, longitude = offset_to_latlon(0.0, 10.5, 33.0, -112.0)
+        self.assertIsNone(
+            project_position(latitude, longitude, 33.0, -112.0, 10, 64, 55)
+        )
+
+    def test_long_axis_reaches_farther_than_the_short_axis_radius(self) -> None:
+        # East/west is the long axis for a 64x55 frame - at the same
+        # angle-preserving pixels-per-nm scale as the short axis, it should
+        # reach past radius_nm rather than stopping at it.
+        latitude, longitude = offset_to_latlon(10.5, 0.0, 33.0, -112.0)
+        self.assertIsNotNone(
+            project_position(latitude, longitude, 33.0, -112.0, 10, 64, 55)
+        )
+
+    def test_diagonal_point_excluded_by_a_circle_is_visible_under_the_box(
+        self,
+    ) -> None:
+        # 9nm east and 9nm north is outside a circle of radius 10
+        # (9**2 + 9**2 > 10**2) but inside the box both axes now clip to.
+        latitude, longitude = offset_to_latlon(9.0, 9.0, 33.0, -112.0)
+        self.assertIsNotNone(
+            project_position(latitude, longitude, 33.0, -112.0, 10, 64, 55)
+        )
+
+
+class OffsetToLatLonTests(unittest.TestCase):
+    def test_round_trips_with_offset_nautical_miles(self) -> None:
+        east, north = offset_nautical_miles(33.05, -111.9, 33.0, -112.0)
+        latitude, longitude = offset_to_latlon(east, north, 33.0, -112.0)
+        self.assertAlmostEqual(latitude, 33.05)
+        self.assertAlmostEqual(longitude, -111.9)
+
+
+class PixelToOffsetTests(unittest.TestCase):
+    def test_round_trips_with_project_offset(self) -> None:
+        east, north = 5.0, -3.0
+        x, y = project_offset(east, north, 10, 64, 55)
+        round_east, round_north = pixel_to_offset(x, y, 10, 64, 55)
+        self.assertAlmostEqual(round_east, east, delta=0.5)
+        self.assertAlmostEqual(round_north, north, delta=0.5)
+
 
 class NearestPointOnPolylineTests(unittest.TestCase):
     def test_snaps_perpendicular_offset_onto_a_segment(self) -> None:
@@ -167,17 +213,38 @@ class PolylineArcLengthTests(unittest.TestCase):
 
 
 class ClipSegmentToRadiusTests(unittest.TestCase):
+    # A 21x21 frame gives half_width == half_height == 10, so scale == 1
+    # and the box is exactly [-10, 10] on both axes - matching the old
+    # circle-radius-10 tests for axis-aligned segments.
     def test_segment_entirely_inside_is_unchanged(self) -> None:
         self.assertEqual(
-            clip_segment_to_radius(1.0, 1.0, 2.0, 2.0, 10.0), (1.0, 1.0, 2.0, 2.0)
+            clip_segment_to_radius(1.0, 1.0, 2.0, 2.0, 10.0, 21, 21),
+            (1.0, 1.0, 2.0, 2.0),
         )
 
     def test_segment_entirely_outside_is_none(self) -> None:
-        self.assertIsNone(clip_segment_to_radius(20.0, 20.0, 25.0, 25.0, 10.0))
+        self.assertIsNone(
+            clip_segment_to_radius(20.0, 20.0, 25.0, 25.0, 10.0, 21, 21)
+        )
 
     def test_segment_crossing_boundary_is_clipped_to_radius(self) -> None:
-        clipped = clip_segment_to_radius(0.0, 0.0, 20.0, 0.0, 10.0)
+        clipped = clip_segment_to_radius(0.0, 0.0, 20.0, 0.0, 10.0, 21, 21)
         self.assertEqual(clipped, (0.0, 0.0, 10.0, 0.0))
+
+    def test_diagonal_segment_reaches_further_than_a_circle_would(self) -> None:
+        # A circle of radius 10 would clip this diagonal at
+        # (~7.07, ~7.07) (where x**2 + y**2 == 10**2); the box clips at
+        # the corner (10, 10) instead.
+        clipped = clip_segment_to_radius(0.0, 0.0, 20.0, 20.0, 10.0, 21, 21)
+        self.assertEqual(clipped, (0.0, 0.0, 10.0, 10.0))
+
+    def test_clip_reaches_farther_on_the_longer_axis(self) -> None:
+        # width=64 > height=55, so east/west is the long axis: it should
+        # clip past radius_nm=10 rather than stopping exactly at it.
+        clipped = clip_segment_to_radius(0.0, 0.0, 20.0, 0.0, 10.0, 64, 55)
+        self.assertEqual(clipped[:2], (0.0, 0.0))
+        self.assertGreater(clipped[2], 10.0)
+        self.assertEqual(clipped[3], 0.0)
 
 
 class ConfigurationTests(unittest.TestCase):

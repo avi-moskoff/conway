@@ -13,6 +13,7 @@ from air_traffic.projection import (
     clip_segment_to_radius,
     nearest_point_on_polyline,
     offset_nautical_miles,
+    offset_within_frame,
     project_offset,
     project_position,
 )
@@ -297,15 +298,6 @@ class FlightRadarGame(Game):
 
     def _draw_rail_lines(self, frame: np.ndarray, radar_height: int) -> None:
         radius_nm = self._config.radius_nm
-        # Home is rarely exactly on a track's latitude/longitude, so the
-        # visible radius (a circle in real-world terms) doesn't reach the
-        # rectangular frame's corners - clipping tracks to the true radius
-        # can cut a line off well short of the edge. Clip to a wider radius
-        # instead (a corner is at most radius_nm * sqrt(2) away) and keep
-        # projecting at the real radius_nm, so project_offset's existing
-        # clamp pins the line at the frame edge rather than mid-frame. Trains
-        # and everything else still only render within the true radius.
-        clip_radius_nm = radius_nm * 1.5
         canvas = Image.new("1", (self.width, radar_height), 0)
         draw = ImageDraw.Draw(canvas)
         drawn = False
@@ -321,7 +313,7 @@ class FlightRadarGame(Game):
             ]
             for (east1, north1), (east2, north2) in zip(offsets, offsets[1:]):
                 clipped = clip_segment_to_radius(
-                    east1, north1, east2, north2, clip_radius_nm
+                    east1, north1, east2, north2, radius_nm, self.width, radar_height
                 )
                 if clipped is None:
                     continue
@@ -388,7 +380,7 @@ class FlightRadarGame(Game):
             east_speed, north_speed = velocities.get(train.vehicle_id, (0.0, 0.0))
             east += east_speed * fix_age
             north += north_speed * fix_age
-            if east * east + north * north > radius_nm * radius_nm:
+            if not offset_within_frame(east, north, radius_nm, self.width, radar_height):
                 continue
             offsets = line_offsets.get(train.route_id)
             if offsets:

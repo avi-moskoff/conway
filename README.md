@@ -9,6 +9,8 @@ includes:
 - Langton's Ant on a randomized board
 - A boids flocking simulation
 - An optional live aircraft radar powered by adsb.lol
+- An optional weather radar, cycling between air quality and current
+  conditions, powered by Open-Meteo
 
 Turn the rotary encoder to switch games. Each game keeps its state while it is
 inactive, so switching back resumes where it left off. Press the illuminated
@@ -190,6 +192,26 @@ The radar makes no requests while another game is selected. Its aircraft and
 route caches live only in RAM, and neither coordinates nor aircraft history are
 written to disk by the application.
 
+The weather-radar game is included whenever the same `CONWAY_HOME_LATITUDE`/
+`CONWAY_HOME_LONGITUDE` are set. It samples a small grid of points around home
+and interpolates them into a continuous field, the same north-up scale as the
+flight radar. Press the reset button to cycle between current conditions
+(temperature and a black→blue→white precipitation field) and air quality (a
+green→yellow→orange→red→purple→maroon field on the EPA US AQI scale). A dim
+gray dot marks each configured landmark, giving the map a sense of scale; a
+bright center pixel marks home.
+
+```text
+CONWAY_WEATHER_RADIUS_NM=15
+CONWAY_WEATHER_POLL_SECONDS=600
+CONWAY_WEATHER_LANDMARKS=Camelback Mountain:33.5205:-111.9648;South Mountain:33.3306:-112.0533
+```
+
+`CONWAY_WEATHER_LANDMARKS` is optional and semicolon-separated, each entry
+formatted `Name:latitude:longitude`. All other settings are optional and fall
+back to the defaults shown above. Weather and air-quality data come from the
+free [Open-Meteo](https://open-meteo.com/) APIs, which need no API key.
+
 Run the entry point with the permissions required by the RGB matrix driver:
 
 ```sh
@@ -226,6 +248,20 @@ restarting:
 sudo systemctl daemon-reload
 sudo systemctl restart conway
 ```
+
+## Data sources
+
+This project displays live data from a few free, third-party APIs:
+
+- Aircraft positions and routes from [adsb.lol](https://adsb.lol/), a
+  community ADS-B aggregator.
+- Valley Metro light rail and streetcar positions/arrivals from Phoenix's
+  public [GTFS-RT open data](https://www.phoenixopendata.com/dataset/general-transit-feed-specification).
+- Weather conditions and air quality from [Open-Meteo](https://open-meteo.com/),
+  licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+  The weather-radar game samples a small grid of points around the configured
+  home location and interpolates/color-maps them for the LED matrix, rather
+  than displaying the raw values.
 
 ## License
 

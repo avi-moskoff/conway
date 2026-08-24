@@ -8,7 +8,7 @@ from PIL import Image, ImageDraw
 
 from air_traffic import AdsbLolError
 from air_traffic.models import Aircraft, FlightRoute
-from air_traffic.projection import project_position
+from air_traffic.projection import offset_to_latlon, project_position
 from config import FlightRadarConfig
 from games.flight_radar import FlightRadarGame
 from transit.models import StopArrival, Train
@@ -104,6 +104,67 @@ class FlightRadarGameTests(unittest.TestCase):
         )
         self.assertTrue(np.any(np.all(frame == self.game.airport_color, axis=2)))
         self.assertFalse(np.any(np.all(frame == (0, 192, 255), axis=2)))
+
+    def test_diagonal_aircraft_excluded_by_the_old_circle_is_now_visible(self) -> None:
+        # radius_nm defaults to 8; 7nm east and 7nm north is outside a
+        # circle of that radius (7**2 + 7**2 > 8**2) but inside the box
+        # both axes now clip to.
+        latitude, longitude = offset_to_latlon(7.0, 7.0, 33.0, -112.0)
+        with self.game._data_lock:
+            self.game._aircraft = (
+                Aircraft(
+                    icao_hex="corner",
+                    callsign="CORNER",
+                    latitude=latitude,
+                    longitude=longitude,
+                ),
+            )
+            self.game._snapshot_time = monotonic()
+
+        frame = self.game.frame
+
+        self.assertTrue(
+            np.any(np.all(frame == self.game.featured_aircraft_color, axis=2))
+        )
+
+    def test_long_axis_shows_aircraft_beyond_the_old_uniform_radius(self) -> None:
+        # width=64 > radar_height=51, so east/west is the long axis: 9nm
+        # due east is past radius_nm=8 (excluded under the old scaling,
+        # which capped every axis at radius_nm) but within reach now that
+        # the long axis extends proportionally farther at the same
+        # angle-preserving pixels-per-nm scale as the short axis.
+        latitude, longitude = offset_to_latlon(9.0, 0.0, 33.0, -112.0)
+        with self.game._data_lock:
+            self.game._aircraft = (
+                Aircraft(
+                    icao_hex="far-east",
+                    callsign="FAREAST",
+                    latitude=latitude,
+                    longitude=longitude,
+                ),
+            )
+            self.game._snapshot_time = monotonic()
+
+        frame = self.game.frame
+
+        self.assertTrue(
+            np.any(np.all(frame == self.game.featured_aircraft_color, axis=2))
+        )
+
+    def test_train_near_corner_excluded_by_the_old_circle_is_now_visible(self) -> None:
+        latitude, longitude = offset_to_latlon(7.0, 7.0, 33.0, -112.0)
+        synthetic_line = {"A": ((33.0, -112.0), (latitude, longitude))}
+        with patch("games.flight_radar.LINE_GEOMETRY", synthetic_line):
+            self.game.reset()  # -> westbound_eta; rail only draws off aircraft mode
+            with self.game._data_lock:
+                self.game._trains = (Train("1", "A", 0, latitude, longitude),)
+                self.game._train_snapshot_time = monotonic()
+
+            frame = self.game.frame
+
+        self.assertTrue(
+            np.any(np.all(frame == self.game.eastbound_train_color, axis=2))
+        )
 
     def test_aircraft_mode_hides_rail_and_trains(self) -> None:
         synthetic_line = {"A": ((33.0, -112.0), (33.0, -111.95))}

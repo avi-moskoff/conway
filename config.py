@@ -87,3 +87,68 @@ class FlightRadarConfig:
             ),
             rail_poll_seconds=rail_poll_seconds,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class WeatherRadarConfig:
+    home_latitude: float
+    home_longitude: float
+    radius_nm: float = 15.0
+    poll_seconds: float = 600.0
+    landmarks: tuple[tuple[str, float, float], ...] = ()
+
+    @classmethod
+    def from_environment(cls) -> "WeatherRadarConfig | None":
+        latitude_text = os.getenv("CONWAY_HOME_LATITUDE")
+        longitude_text = os.getenv("CONWAY_HOME_LONGITUDE")
+        if latitude_text is None and longitude_text is None:
+            return None
+        if latitude_text is None or longitude_text is None:
+            raise ValueError("Both CONWAY_HOME_LATITUDE and CONWAY_HOME_LONGITUDE are required")
+
+        try:
+            latitude = float(latitude_text)
+            longitude = float(longitude_text)
+            radius = float(os.getenv("CONWAY_WEATHER_RADIUS_NM", "15"))
+            poll_seconds = float(os.getenv("CONWAY_WEATHER_POLL_SECONDS", "600"))
+        except ValueError as error:
+            raise ValueError("Weather radar configuration must contain numbers") from error
+        if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+            raise ValueError("Weather radar coordinates are out of range")
+        if not 1 <= radius <= 250:
+            raise ValueError("CONWAY_WEATHER_RADIUS_NM must be between 1 and 250")
+        if poll_seconds < 60:
+            raise ValueError("CONWAY_WEATHER_POLL_SECONDS must be at least 60")
+
+        return cls(
+            home_latitude=latitude,
+            home_longitude=longitude,
+            radius_nm=radius,
+            poll_seconds=poll_seconds,
+            landmarks=cls._parse_landmarks(os.getenv("CONWAY_WEATHER_LANDMARKS", "")),
+        )
+
+    @staticmethod
+    def _parse_landmarks(text: str) -> tuple[tuple[str, float, float], ...]:
+        landmarks = []
+        for entry in text.split(";"):
+            entry = entry.strip()
+            if not entry:
+                continue
+            parts = entry.split(":")
+            if len(parts) != 3:
+                raise ValueError(
+                    'CONWAY_WEATHER_LANDMARKS entries must look like "Name:lat:lon"'
+                )
+            name, latitude_text, longitude_text = parts
+            try:
+                latitude = float(latitude_text)
+                longitude = float(longitude_text)
+            except ValueError as error:
+                raise ValueError(
+                    "CONWAY_WEATHER_LANDMARKS coordinates must be numbers"
+                ) from error
+            if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+                raise ValueError("CONWAY_WEATHER_LANDMARKS coordinates are out of range")
+            landmarks.append((name.strip(), latitude, longitude))
+        return tuple(landmarks)

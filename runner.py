@@ -7,9 +7,16 @@ from threading import Event, Lock
 import numpy as np
 from gpiozero import Button, LED, RotaryEncoder
 
-from config import FlightRadarConfig
+from config import FlightRadarConfig, WeatherRadarConfig
 from display import MatrixDisplay
-from games import BoidsGame, FlightRadarGame, Game, GameOfLife, Langton
+from games import (
+    BoidsGame,
+    FlightRadarGame,
+    Game,
+    GameOfLife,
+    Langton,
+    WeatherRadarGame,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +131,13 @@ class GameRunner:
             )
         else:
             logger.info("Flight radar disabled: home coordinates are not configured")
+        weather_config = WeatherRadarConfig.from_environment()
+        if weather_config is not None:
+            games.append(
+                WeatherRadarGame(self.HEIGHT, self.WIDTH, config=weather_config)
+            )
+        else:
+            logger.info("Weather radar disabled: home coordinates are not configured")
         return games
 
     def stop(self, _signal_number: int, _frame: object) -> None:
