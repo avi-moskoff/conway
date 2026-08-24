@@ -1,3 +1,4 @@
+import hashlib
 import io
 import logging
 import socket
@@ -201,12 +202,17 @@ class GoesDustClient:
                 )
                 last_network_error = GoesDustError("could not reach NOAA STAR API")
                 continue
+            digest = hashlib.sha256(body).hexdigest()[:16]
             if self._is_valid_image(body):
-                logger.info("Dust fetch %s: OK (%d bytes)", timestamp, len(body))
+                logger.info(
+                    "Dust fetch %s: OK (%d bytes, sha256=%s)", timestamp, len(body), digest
+                )
                 return body
             logger.warning(
-                "Dust fetch %s attempt %d/%d: %d bytes but failed to decode, starts with %r",
-                timestamp, attempt + 1, self.retries_per_timestamp, len(body), body[:32],
+                "Dust fetch %s attempt %d/%d: %d bytes but failed to decode, "
+                "sha256=%s, starts with %r",
+                timestamp, attempt + 1, self.retries_per_timestamp,
+                len(body), digest, body[:32],
             )
             last_network_error = None
         if last_network_error is not None:
