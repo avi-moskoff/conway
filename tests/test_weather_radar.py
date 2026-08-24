@@ -116,6 +116,31 @@ class WeatherRadarGameTests(unittest.TestCase):
             self.game.display_modes[self.game._display_mode_index], "conditions"
         )
 
+    def test_reset_wakes_both_pollers_for_an_immediate_retry(self) -> None:
+        self.game._wake_event.clear()
+        self.game._dust_wake_event.clear()
+
+        self.game.reset()
+
+        self.assertTrue(self.game._wake_event.is_set())
+        self.assertTrue(self.game._dust_wake_event.is_set())
+
+    def test_backoff_starts_short_and_ramps_toward_the_poll_interval(self) -> None:
+        base = self.game._config.dust_poll_seconds  # 0.05 in this test's config
+        first = self.game._exponential_backoff_seconds(1, base)
+        second = self.game._exponential_backoff_seconds(2, base)
+        # Should ramp up, but never past the steady-state poll interval.
+        self.assertLessEqual(first, base)
+        self.assertLessEqual(second, base)
+        self.assertLessEqual(first, second)
+
+    def test_backoff_does_not_jump_straight_to_the_ceiling_on_first_failure(self) -> None:
+        # Regression guard: with a multi-minute poll interval, the first
+        # failure used to immediately hit the 5-minute ceiling, making a
+        # one-off transient failure cost a full 5 minutes to recover from.
+        first_failure_wait = self.game._exponential_backoff_seconds(1, 300.0)
+        self.assertLess(first_failure_wait, 300.0)
+
     def test_no_data_shows_no_signal(self) -> None:
         self.game.frame
         self.assertEqual(self.game._last_label, "NO SIGNAL")

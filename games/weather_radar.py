@@ -234,13 +234,17 @@ class WeatherRadarGame(Game):
         logger.info("Weather radar polling stopped")
 
     def reset(self) -> None:
-        # Both modes' data are already fetched and cached every poll (see
-        # _poll_loop), so switching modes only changes which cached field
-        # is displayed - no fresh fetch is needed here.
         self._display_mode_index = (self._display_mode_index + 1) % len(
             self.display_modes
         )
         self._scroll_offset = 0
+        # All modes' data are already fetched and cached continuously
+        # regardless of which one is displayed, so this isn't required for
+        # switching modes - but nudging both pollers gives the button a
+        # useful second job: force an immediate retry rather than waiting
+        # out a backoff after a transient failure (e.g. a flaky network).
+        self._wake_event.set()
+        self._dust_wake_event.set()
 
     def advance(self) -> None:
         if self._ticker_scrolls:
@@ -371,7 +375,13 @@ class WeatherRadarGame(Game):
 
     @staticmethod
     def _exponential_backoff_seconds(failures: int, base_poll_seconds: float) -> float:
-        return min(5 * 60.0, base_poll_seconds * (2 ** min(failures, 5)))
+        # Starts small regardless of the steady-state poll interval (which
+        # for this game runs 5-10 minutes) so a transient failure recovers
+        # in seconds rather than waiting out the full normal cadence, then
+        # ramps up toward it rather than retrying forever at high frequency.
+        retry_start_seconds = 15.0
+        ceiling = min(5 * 60.0, base_poll_seconds)
+        return min(ceiling, retry_start_seconds * (2 ** min(failures, 6)))
 
     def _dust_poll_loop(self) -> None:
         failures = 0
