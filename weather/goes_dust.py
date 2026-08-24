@@ -1,9 +1,11 @@
 import io
+import socket
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
+from http.client import HTTPSConnection
 from time import sleep
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import HTTPSHandler, Request, build_opener
 
 from PIL import Image
 
@@ -14,8 +16,46 @@ class GoesDustError(RuntimeError):
     pass
 
 
+def _connect_ipv4_only(host: str, port: int, timeout: float | None) -> socket.socket:
+    # Some networks resolve this CDN to an IPv6 address that's advertised
+    # but doesn't actually route (observed directly: 100% ping loss to the
+    # resolved AAAA record, while IPv4 works fine) - plain socket.create_
+    # connection() would still try that broken address first. Restrict
+    # getaddrinfo to AF_INET so this client only ever attempts IPv4.
+    last_error: OSError | None = None
+    for family, socktype, proto, _canonname, address in socket.getaddrinfo(
+        host, port, socket.AF_INET, socket.SOCK_STREAM
+    ):
+        sock = socket.socket(family, socktype, proto)
+        try:
+            sock.settimeout(timeout)
+            sock.connect(address)
+            return sock
+        except OSError as error:
+            sock.close()
+            last_error = error
+    raise last_error or OSError(f"no IPv4 address found for {host}")
+
+
+class _IPv4OnlyHTTPSConnection(HTTPSConnection):
+    def connect(self) -> None:
+        sock = _connect_ipv4_only(self.host, self.port, self.timeout)
+        if self._tunnel_host:
+            self.sock = sock
+            self._tunnel()
+        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+
+
+class _IPv4OnlyHTTPSHandler(HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(_IPv4OnlyHTTPSConnection, req)
+
+
+_ipv4_opener = build_opener(_IPv4OnlyHTTPSHandler)
+
+
 def _default_transport(request: Request, timeout: float) -> bytes:
-    with urlopen(request, timeout=timeout) as response:
+    with _ipv4_opener.open(request, timeout=timeout) as response:
         return response.read()
 
 
