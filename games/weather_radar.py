@@ -238,13 +238,18 @@ class WeatherRadarGame(Game):
             self.display_modes
         )
         self._scroll_offset = 0
-        # All modes' data are already fetched and cached continuously
-        # regardless of which one is displayed, so this isn't required for
-        # switching modes - but nudging both pollers gives the button a
-        # useful second job: force an immediate retry rather than waiting
-        # out a backoff after a transient failure (e.g. a flaky network).
-        self._wake_event.set()
-        self._dust_wake_event.set()
+        # Data is already fetched and cached continuously regardless of
+        # which mode is displayed, so this isn't required for switching -
+        # but nudging the poller for the mode just switched into gives the
+        # button a useful second job: force an immediate retry there rather
+        # than waiting out a backoff after a transient failure. Only that
+        # one poller, not both - no reason to hit the AQI/conditions API
+        # when switching into dust mode, or vice versa.
+        mode = self.display_modes[self._display_mode_index]
+        if mode == "dust":
+            self._dust_wake_event.set()
+        else:
+            self._wake_event.set()
 
     def advance(self) -> None:
         if self._ticker_scrolls:

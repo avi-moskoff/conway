@@ -116,14 +116,23 @@ class WeatherRadarGameTests(unittest.TestCase):
             self.game.display_modes[self.game._display_mode_index], "conditions"
         )
 
-    def test_reset_wakes_both_pollers_for_an_immediate_retry(self) -> None:
+    def test_reset_wakes_only_the_poller_for_the_mode_switched_into(self) -> None:
         self.game._wake_event.clear()
         self.game._dust_wake_event.clear()
 
-        self.game.reset()
-
+        self.game.reset()  # conditions -> aqi
         self.assertTrue(self.game._wake_event.is_set())
+        self.assertFalse(self.game._dust_wake_event.is_set())
+
+        self.game._wake_event.clear()
+        self.game.reset()  # aqi -> dust
+        self.assertFalse(self.game._wake_event.is_set())
         self.assertTrue(self.game._dust_wake_event.is_set())
+
+        self.game._dust_wake_event.clear()
+        self.game.reset()  # dust -> conditions
+        self.assertTrue(self.game._wake_event.is_set())
+        self.assertFalse(self.game._dust_wake_event.is_set())
 
     def test_backoff_starts_short_and_ramps_toward_the_poll_interval(self) -> None:
         base = self.game._config.dust_poll_seconds  # 0.05 in this test's config
