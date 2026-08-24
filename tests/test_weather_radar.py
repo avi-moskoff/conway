@@ -1,32 +1,23 @@
-import io
 import unittest
 from datetime import datetime, timezone
 
 import numpy as np
-from PIL import Image
 
 from config import WeatherRadarConfig
 from games.weather_radar import WeatherRadarGame
 from weather.models import AirQualitySample, WeatherSample
 
 
-def _fake_sector_image_bytes(size: int = 1200, color=(120, 60, 10)) -> bytes:
-    image = Image.new("RGB", (size, size), color)
-    buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
-    return buffer.getvalue()
-
-
 class FakeGoesDustClient:
     def __init__(self) -> None:
         self.error: Exception | None = None
         self.frame_time = datetime(2026, 8, 24, 3, 46, tzinfo=timezone.utc)
-        self.image_bytes = _fake_sector_image_bytes()
+        self.sector_array = np.full((1200, 1200, 3), (120, 60, 10), dtype=np.uint8)
 
     def latest_frame(self):
         if self.error is not None:
             raise self.error
-        return self.image_bytes, self.frame_time
+        return self.sector_array, self.frame_time
 
 
 class FakeOpenMeteoClient:
@@ -88,8 +79,8 @@ class WeatherRadarGameTests(unittest.TestCase):
         self.game._store_conditions(weather_samples)
         aqi_samples = self.client.air_quality_for(self.game._query_points)
         self.game._store_aqi(aqi_samples)
-        body, frame_time = self.dust_client.latest_frame()
-        self.game._store_dust(body, frame_time)
+        sector_array, frame_time = self.dust_client.latest_frame()
+        self.game._store_dust(sector_array, frame_time)
 
     def test_frame_shape_and_dtype(self) -> None:
         self._seed()

@@ -1,4 +1,3 @@
-import io
 import logging
 from datetime import datetime
 from threading import Event, Lock, Thread
@@ -399,8 +398,8 @@ class WeatherRadarGame(Game):
                 result = self._dust_client.latest_frame()
                 if result is None:
                     raise RuntimeError("no dust frame available")
-                body, frame_time = result
-                self._store_dust(body, frame_time)
+                sector_array, frame_time = result
+                self._store_dust(sector_array, frame_time)
                 failures = 0
                 wait_seconds = self._config.dust_poll_seconds
             except Exception as error:
@@ -414,15 +413,7 @@ class WeatherRadarGame(Game):
             self._dust_wake_event.wait(wait_seconds)
             self._dust_wake_event.clear()
 
-    def _store_dust(self, body: bytes, frame_time: datetime) -> None:
-        try:
-            sector_image = Image.open(io.BytesIO(body)).convert("RGB")
-        except Exception as error:
-            raise RuntimeError(
-                f"could not decode dust image ({len(body)} bytes, "
-                f"starts with {body[:40]!r})"
-            ) from error
-        sector_array = np.asarray(sector_image)
+    def _store_dust(self, sector_array: np.ndarray, frame_time: datetime) -> None:
         size = sector_array.shape[0]
         x = np.clip(np.rint(self._dust_sector_x).astype(int), 0, size - 1)
         y = np.clip(np.rint(self._dust_sector_y).astype(int), 0, size - 1)

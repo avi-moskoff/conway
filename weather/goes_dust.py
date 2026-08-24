@@ -3,21 +3,72 @@ import io
 import logging
 import socket
 from collections.abc import Callable
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timedelta, timezone
 from http.client import HTTPSConnection
+from multiprocessing import get_context
 from time import sleep
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPSHandler, Request, build_opener
 
+import numpy as np
 from PIL import Image
 
 logger = logging.getLogger(__name__)
 
 Transport = Callable[[Request, float], bytes]
+Decoder = Callable[[bytes], "np.ndarray | None"]
 
 
 class GoesDustError(RuntimeError):
     pass
+
+
+def _decode_jpeg(body: bytes) -> np.ndarray | None:
+    """Decodes JPEG bytes to an RGB array. Runs inside an isolated worker
+    process (see _decode_via_subprocess) - must stay a plain, picklable,
+    module-level function with no dependency on any of this process's
+    state, since the worker process doesn't share it.
+    """
+    try:
+        with Image.open(io.BytesIO(body)) as image:
+            return np.asarray(image.convert("RGB"))
+    except Exception:
+        return None
+
+
+_decode_executor: ProcessPoolExecutor | None = None
+_decode_timeout_seconds = 15.0
+
+
+def _decode_via_subprocess(body: bytes) -> np.ndarray | None:
+    # Confirmed by direct testing: once this app's main process has
+    # constructed an RGBMatrix (real GPIO/PWM hardware access), JPEG
+    # decoding fails consistently on any thread of that process - even
+    # though the exact same bytes decode fine everywhere else tested (a
+    # bare background thread with nothing else running, the venv's exact
+    # Python/Pillow build standalone, root, real-time scheduling alone).
+    # Only actually constructing RGBMatrix() in-process reproduces it -
+    # most likely something it does at the OS level (memory locking, a
+    # real-time hardware-refresh thread) that's incompatible with decoding
+    # elsewhere in the same process. Routing decode through a separate
+    # worker process sidesteps whatever that is entirely, rather than
+    # needing to fully understand or fix it.
+    #
+    # Uses "spawn" (a fresh Python interpreter) rather than "fork", so the
+    # worker never inherits a copy of this process's state - including
+    # whatever RGBMatrix has already done to it - regardless of whether
+    # RGBMatrix has been constructed yet when this first runs.
+    global _decode_executor
+    if _decode_executor is None:
+        _decode_executor = ProcessPoolExecutor(max_workers=1, mp_context=get_context("spawn"))
+    try:
+        return _decode_executor.submit(_decode_jpeg, body).result(
+            timeout=_decode_timeout_seconds
+        )
+    except Exception as error:
+        logger.warning("Dust decode worker error: %s: %s", type(error).__name__, error)
+        return None
 
 
 def _connect_ipv4_only(host: str, port: int, timeout: float | None) -> socket.socket:
@@ -136,16 +187,18 @@ class GoesDustClient:
         timeout_seconds: float = 10.0,
         transport: Transport | None = None,
         retry_delay_seconds: float | None = None,
+        decode: Decoder | None = None,
     ) -> None:
         self._satellite = satellite
         self._sector = sector
         self._band = band
         self._timeout_seconds = timeout_seconds
         self._transport = transport or _default_transport
+        self._decode = decode or _decode_via_subprocess
         if retry_delay_seconds is not None:
             self.retry_delay_seconds = retry_delay_seconds
 
-    def latest_frame(self, now: datetime | None = None) -> tuple[bytes, datetime] | None:
+    def latest_frame(self, now: datetime | None = None) -> tuple[np.ndarray, datetime] | None:
         # NOAA publishes on a schedule offset by one minute from a clean
         # 5-minute grid (:01, :06, :11, ... not :00, :05, :10) - shift back
         # a minute before flooring to land on that schedule, then shift
@@ -158,13 +211,13 @@ class GoesDustClient:
         candidate = shifted.replace(minute=floored_minute, second=0, microsecond=0)
         candidate += timedelta(minutes=1)
         for _ in range(self.max_lookback_attempts):
-            body = self._try_fetch(candidate)
-            if body is not None:
-                return body, candidate
+            frame = self._try_fetch(candidate)
+            if frame is not None:
+                return frame, candidate
             candidate -= timedelta(minutes=self.update_interval_minutes)
         return None
 
-    def _try_fetch(self, timestamp: datetime) -> bytes | None:
+    def _try_fetch(self, timestamp: datetime) -> np.ndarray | None:
         # A 404 means this timestamp genuinely isn't published - retrying it
         # won't help, so fall straight back to an older one. Anything else
         # (a network error, or a fetched body that fails to decode) could be
@@ -203,11 +256,12 @@ class GoesDustClient:
                 last_network_error = GoesDustError("could not reach NOAA STAR API")
                 continue
             digest = hashlib.sha256(body).hexdigest()[:16]
-            if self._is_valid_image(body):
+            decoded = self._decode(body)
+            if decoded is not None:
                 logger.info(
                     "Dust fetch %s: OK (%d bytes, sha256=%s)", timestamp, len(body), digest
                 )
-                return body
+                return decoded
             logger.warning(
                 "Dust fetch %s attempt %d/%d: %d bytes but failed to decode, "
                 "sha256=%s, starts with %r",
@@ -218,18 +272,6 @@ class GoesDustClient:
         if last_network_error is not None:
             raise last_network_error
         return None
-
-    @staticmethod
-    def _is_valid_image(body: bytes) -> bool:
-        # Uses the same open()+load() path _store_dust actually decodes
-        # with (not the lighter-weight verify()), so "validated OK" here
-        # can't diverge from "actually usable" there.
-        try:
-            with Image.open(io.BytesIO(body)) as image:
-                image.load()
-            return True
-        except Exception:
-            return False
 
     def _image_url(self, timestamp: datetime) -> str:
         stamp = (
