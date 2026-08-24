@@ -112,8 +112,11 @@ class GoesDustClient:
         return None
 
     def _try_fetch(self, timestamp: datetime) -> bytes | None:
+        request = Request(self._image_url(timestamp))
+        request.add_header("Accept", "image/jpeg")
+        request.add_header("User-Agent", "conway-led-matrix/0.1")
         try:
-            return self._transport(Request(self._image_url(timestamp)), self._timeout_seconds)
+            return self._transport(request, self._timeout_seconds)
         except HTTPError as error:
             if error.code == 404:
                 return None

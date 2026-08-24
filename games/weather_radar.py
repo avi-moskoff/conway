@@ -400,7 +400,19 @@ class WeatherRadarGame(Game):
             self._dust_wake_event.clear()
 
     def _store_dust(self, body: bytes, frame_time: datetime) -> None:
-        sector_array = np.asarray(Image.open(io.BytesIO(body)).convert("RGB"))
+        try:
+            sector_image = Image.open(io.BytesIO(body)).convert("RGB")
+        except Exception as error:
+            # Whatever came back wasn't a decodable image - could be an ISP
+            # captive portal, a DNS blocklist intercepting the CDN host, or
+            # a truncated download. Surface enough of the response to tell
+            # those apart from the log line alone, since this environment
+            # can't see the Pi's network path directly.
+            raise RuntimeError(
+                f"could not decode dust image ({len(body)} bytes, "
+                f"starts with {body[:40]!r})"
+            ) from error
+        sector_array = np.asarray(sector_image)
         size = sector_array.shape[0]
         x = np.clip(np.rint(self._dust_sector_x).astype(int), 0, size - 1)
         y = np.clip(np.rint(self._dust_sector_y).astype(int), 0, size - 1)
