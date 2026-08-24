@@ -15,7 +15,6 @@ from air_traffic.projection import (
 )
 from config import WeatherRadarConfig
 from games.base import Game
-from pil_lock import pil_lock
 from weather import (
     AirQualitySample,
     GoesDustClient,
@@ -417,9 +416,7 @@ class WeatherRadarGame(Game):
 
     def _store_dust(self, body: bytes, frame_time: datetime) -> None:
         try:
-            # See pil_lock.py.
-            with pil_lock:
-                sector_image = Image.open(io.BytesIO(body)).convert("RGB")
+            sector_image = Image.open(io.BytesIO(body)).convert("RGB")
         except Exception as error:
             raise RuntimeError(
                 f"could not decode dust image ({len(body)} bytes, "
@@ -502,26 +499,24 @@ class WeatherRadarGame(Game):
         if label != self._last_label:
             self._scroll_offset = 0
         self._last_label = label
-        # See pil_lock.py.
-        with pil_lock:
-            canvas = Image.new("1", (self.width, self.ticker_height), 0)
-            draw = ImageDraw.Draw(canvas)
-            text_width = int(draw.textlength(label, font=self._font))
-            self._ticker_scrolls = text_width > self.width
+        canvas = Image.new("1", (self.width, self.ticker_height), 0)
+        draw = ImageDraw.Draw(canvas)
+        text_width = int(draw.textlength(label, font=self._font))
+        self._ticker_scrolls = text_width > self.width
 
-            if self._ticker_scrolls:
-                cycle_width = text_width + 8
-                x = -(self._scroll_offset % cycle_width)
-                draw.text((x, -1), label, fill=1, font=self._font)
-                draw.text((x + cycle_width, -1), label, fill=1, font=self._font)
-            else:
-                x = (self.width - text_width) // 2
-                draw.text((x, -1), label, fill=1, font=self._font)
+        if self._ticker_scrolls:
+            cycle_width = text_width + 8
+            x = -(self._scroll_offset % cycle_width)
+            draw.text((x, -1), label, fill=1, font=self._font)
+            draw.text((x + cycle_width, -1), label, fill=1, font=self._font)
+        else:
+            x = (self.width - text_width) // 2
+            draw.text((x, -1), label, fill=1, font=self._font)
 
-            # Avoid Pillow's Image.__array_interface__, which goes through
-            # Image.tobytes() and unnecessarily requires the optional
-            # ImageFile module on the minimal Raspberry Pi installation.
-            mask = np.asarray(list(canvas.get_flattened_data()), dtype=np.uint8)
+        # Avoid Pillow's Image.__array_interface__, which goes through
+        # Image.tobytes() and unnecessarily requires the optional ImageFile
+        # module on the minimal Raspberry Pi installation.
+        mask = np.asarray(list(canvas.get_flattened_data()), dtype=np.uint8)
         mask = mask.reshape(self.ticker_height, self.width) != 0
         ticker = frame[-self.ticker_height :]
         ticker[:] = 0

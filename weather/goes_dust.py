@@ -10,8 +10,6 @@ from urllib.request import HTTPSHandler, Request, build_opener
 
 from PIL import Image
 
-from pil_lock import pil_lock
-
 logger = logging.getLogger(__name__)
 
 Transport = Callable[[Request, float], bytes]
@@ -221,7 +219,7 @@ class GoesDustClient:
         # with (not the lighter-weight verify()), so "validated OK" here
         # can't diverge from "actually usable" there.
         try:
-            with pil_lock, Image.open(io.BytesIO(body)) as image:
+            with Image.open(io.BytesIO(body)) as image:
                 image.load()
             return True
         except Exception:
