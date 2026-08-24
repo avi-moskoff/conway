@@ -41,24 +41,25 @@ _decode_executor: ProcessPoolExecutor | None = None
 _decode_timeout_seconds = 15.0
 
 
+def warm_up_decode_executor() -> None:
+    """Pre-creates the decode worker process. Call this once at startup,
+    before constructing anything that touches RGBMatrix (real GPIO/PWM
+    hardware) - see _decode_via_subprocess for why. Spawning after
+    RGBMatrix has already altered this process breaks the fork()+exec()
+    spawn itself (observed directly: consistent BrokenPipeError on every
+    attempt once RGBMatrix is already constructed, not just decoding on a
+    shared thread as originally found) - so the worker needs to already
+    exist as an independent process before that happens, not be created
+    lazily on first use the way the rest of this module's callers expect.
+    Once spawned, it's a separate process/address space and is unaffected
+    by whatever the parent does to itself afterward.
+    """
+    _decode_via_subprocess(b"")
+
+
 def _decode_via_subprocess(body: bytes) -> np.ndarray | None:
-    # Confirmed by direct testing: once this app's main process has
-    # constructed an RGBMatrix (real GPIO/PWM hardware access), JPEG
-    # decoding fails consistently on any thread of that process - even
-    # though the exact same bytes decode fine everywhere else tested (a
-    # bare background thread with nothing else running, the venv's exact
-    # Python/Pillow build standalone, root, real-time scheduling alone).
-    # Only actually constructing RGBMatrix() in-process reproduces it -
-    # most likely something it does at the OS level (memory locking, a
-    # real-time hardware-refresh thread) that's incompatible with decoding
-    # elsewhere in the same process. Routing decode through a separate
-    # worker process sidesteps whatever that is entirely, rather than
-    # needing to fully understand or fix it.
-    #
-    # Uses "spawn" (a fresh Python interpreter) rather than "fork", so the
-    # worker never inherits a copy of this process's state - including
-    # whatever RGBMatrix has already done to it - regardless of whether
-    # RGBMatrix has been constructed yet when this first runs.
+    # See warm_up_decode_executor's docstring for why this needs to be
+    # called before RGBMatrix is constructed, not lazily on first real use.
     global _decode_executor
     try:
         if _decode_executor is None:
