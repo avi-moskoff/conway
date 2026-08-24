@@ -1,4 +1,5 @@
 import io
+import logging
 import socket
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
@@ -8,6 +9,8 @@ from urllib.error import HTTPError, URLError
 from urllib.request import HTTPSHandler, Request, build_opener
 
 from PIL import Image
+
+logger = logging.getLogger(__name__)
 
 Transport = Callable[[Request, float], bytes]
 
@@ -168,7 +171,8 @@ class GoesDustClient:
         # specific timestamp, so retry it a couple times in place first -
         # observed in practice that a corrupted/truncated read is often
         # transient and a retry moments later succeeds.
-        request = Request(self._image_url(timestamp))
+        url = self._image_url(timestamp)
+        request = Request(url)
         request.add_header("Accept", "image/jpeg")
         request.add_header("User-Agent", "conway-led-matrix/0.1")
         last_network_error: GoesDustError | None = None
@@ -179,16 +183,31 @@ class GoesDustClient:
                 body = self._transport(request, self._timeout_seconds)
             except HTTPError as error:
                 if error.code == 404:
+                    logger.info("Dust fetch %s: 404 (not yet published)", timestamp)
                     return None
+                logger.warning(
+                    "Dust fetch %s attempt %d/%d: HTTP %d",
+                    timestamp, attempt + 1, self.retries_per_timestamp, error.code,
+                )
                 last_network_error = GoesDustError(
                     f"NOAA STAR API returned HTTP {error.code}"
                 )
                 continue
-            except (OSError, URLError):
+            except (OSError, URLError) as error:
+                logger.warning(
+                    "Dust fetch %s attempt %d/%d: network error (%s: %s)",
+                    timestamp, attempt + 1, self.retries_per_timestamp,
+                    type(error).__name__, error,
+                )
                 last_network_error = GoesDustError("could not reach NOAA STAR API")
                 continue
             if self._is_valid_image(body):
+                logger.info("Dust fetch %s: OK (%d bytes)", timestamp, len(body))
                 return body
+            logger.warning(
+                "Dust fetch %s attempt %d/%d: %d bytes but failed to decode, starts with %r",
+                timestamp, attempt + 1, self.retries_per_timestamp, len(body), body[:32],
+            )
             last_network_error = None
         if last_network_error is not None:
             raise last_network_error
