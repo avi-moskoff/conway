@@ -15,6 +15,7 @@ from air_traffic.projection import (
 )
 from config import WeatherRadarConfig
 from games.base import Game
+from pil_lock import pil_lock
 from weather import (
     AirQualitySample,
     GoesDustClient,
@@ -22,7 +23,6 @@ from weather import (
     WeatherSample,
     sector_pixel_for,
 )
-from weather.goes_dust import decode_lock
 
 logger = logging.getLogger(__name__)
 
@@ -417,11 +417,8 @@ class WeatherRadarGame(Game):
 
     def _store_dust(self, body: bytes, frame_time: datetime) -> None:
         try:
-            # Shares weather.goes_dust's decode_lock: PIL's JPEG decoder
-            # isn't safely reentrant across threads on this platform, and
-            # this runs concurrently with the main render loop's own PIL
-            # calls (ticker drawing) many times a second.
-            with decode_lock:
+            # See pil_lock.py.
+            with pil_lock:
                 sector_image = Image.open(io.BytesIO(body)).convert("RGB")
         except Exception as error:
             raise RuntimeError(
@@ -505,18 +502,8 @@ class WeatherRadarGame(Game):
         if label != self._last_label:
             self._scroll_offset = 0
         self._last_label = label
-        # Shares decode_lock with the dust poller's JPEG decoding. This runs
-        # on the main render thread ~10x/second, and under this project's
-        # real-time/single-core scheduling (see run.sh: chrt -f 90 taskset
-        # -c 3 - a deliberate choice per the matrix library's own guidance,
-        # not incidental), Pillow's C extension calls from this thread and
-        # the dust poller thread were interleaving in ways that corrupted
-        # the dust poller's JPEG decodes - confirmed by testing that the
-        # exact same scheduling setup with no other threads competing does
-        # NOT reproduce the corruption, only the real multi-threaded service
-        # does. decode_lock alone (JPEG decode only) wasn't sufficient;
-        # ticker drawing needed to be included too.
-        with decode_lock:
+        # See pil_lock.py.
+        with pil_lock:
             canvas = Image.new("1", (self.width, self.ticker_height), 0)
             draw = ImageDraw.Draw(canvas)
             text_width = int(draw.textlength(label, font=self._font))

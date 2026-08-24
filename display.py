@@ -2,6 +2,8 @@ import numpy as np
 from PIL import Image
 from rgbmatrix import RGBMatrix, RGBMatrixOptions
 
+from pil_lock import pil_lock
+
 
 class MatrixDisplay:
     """Sends RGB frames to the LED matrix."""
@@ -28,7 +30,10 @@ class MatrixDisplay:
     def show(self, frame: np.ndarray) -> None:
         if self._rotation_quarters:
             frame = np.rot90(frame, k=self._rotation_quarters)
-        image = Image.fromarray(frame, mode="RGB")
+        # See pil_lock.py: this runs every frame on the main render thread
+        # and must not interleave with any other thread's PIL calls.
+        with pil_lock:
+            image = Image.fromarray(frame, mode="RGB")
         self._canvas.SetImage(image)
         self._canvas = self._matrix.SwapOnVSync(self._canvas)
 
