@@ -1,7 +1,10 @@
+import io
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+from PIL import Image
 
 Transport = Callable[[Request, float], bytes]
 
@@ -116,13 +119,31 @@ class GoesDustClient:
         request.add_header("Accept", "image/jpeg")
         request.add_header("User-Agent", "conway-led-matrix/0.1")
         try:
-            return self._transport(request, self._timeout_seconds)
+            body = self._transport(request, self._timeout_seconds)
         except HTTPError as error:
             if error.code == 404:
                 return None
             raise GoesDustError(f"NOAA STAR API returned HTTP {error.code}") from error
         except (OSError, URLError) as error:
             raise GoesDustError("could not reach NOAA STAR API") from error
+        if not self._is_valid_image(body):
+            # Observed in practice: the very freshest timestamp occasionally
+            # comes back corrupted/truncated, seemingly a race with NOAA's
+            # own publish process rather than anything on our end (a retry
+            # moments later for the same timestamp succeeds fine). Treat it
+            # like a 404 - this timestamp isn't usable yet - and fall back
+            # to the next older one instead of surfacing a hard failure.
+            return None
+        return body
+
+    @staticmethod
+    def _is_valid_image(body: bytes) -> bool:
+        try:
+            with Image.open(io.BytesIO(body)) as image:
+                image.verify()
+            return True
+        except Exception:
+            return False
 
     def _image_url(self, timestamp: datetime) -> str:
         stamp = (

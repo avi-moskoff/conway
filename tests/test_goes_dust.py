@@ -1,18 +1,28 @@
+import io
 import unittest
 from datetime import datetime, timezone
 from urllib.error import HTTPError
 from urllib.request import Request
 
+from PIL import Image
+
 from weather.goes_dust import GoesDustClient, GoesDustError, sector_pixel_for
+
+
+def _valid_image_bytes() -> bytes:
+    buffer = io.BytesIO()
+    Image.new("RGB", (4, 4), (10, 20, 30)).save(buffer, format="JPEG")
+    return buffer.getvalue()
 
 
 class GoesDustClientTests(unittest.TestCase):
     def test_aligns_to_noaas_one_minute_offset_schedule(self) -> None:
         requested_urls = []
+        valid_bytes = _valid_image_bytes()
 
         def transport(request: Request, _timeout: float) -> bytes:
             requested_urls.append(request.full_url)
-            return b"fake-jpeg-bytes"
+            return valid_bytes
 
         client = GoesDustClient(transport=transport)
         # 03:53 should probe the most recent published minute (:51), not a
@@ -21,18 +31,19 @@ class GoesDustClientTests(unittest.TestCase):
 
         body, frame_time = client.latest_frame(now=now)
 
-        self.assertEqual(body, b"fake-jpeg-bytes")
+        self.assertEqual(body, valid_bytes)
         self.assertEqual(frame_time, datetime(2026, 8, 24, 3, 51, tzinfo=timezone.utc))
         self.assertIn("20262360351_GOES19-ABI-sr-Dust-1200x1200.jpg", requested_urls[0])
 
     def test_steps_backward_through_404s_until_a_frame_is_found(self) -> None:
         available_timestamp = "20262360341"
         requested_urls = []
+        valid_bytes = _valid_image_bytes()
 
         def transport(request: Request, _timeout: float) -> bytes:
             requested_urls.append(request.full_url)
             if available_timestamp in request.full_url:
-                return b"fake-jpeg-bytes"
+                return valid_bytes
             raise HTTPError(request.full_url, 404, "not found", {}, None)
 
         client = GoesDustClient(transport=transport)
@@ -40,10 +51,35 @@ class GoesDustClientTests(unittest.TestCase):
 
         body, frame_time = client.latest_frame(now=now)
 
-        self.assertEqual(body, b"fake-jpeg-bytes")
+        self.assertEqual(body, valid_bytes)
         self.assertEqual(frame_time, datetime(2026, 8, 24, 3, 41, tzinfo=timezone.utc))
         # 51, 46, 41 - three probes, stopping at the first hit.
         self.assertEqual(len(requested_urls), 3)
+
+    def test_falls_back_when_the_freshest_frame_is_corrupted(self) -> None:
+        # Observed in practice against the real NOAA CDN: the freshest
+        # timestamp can come back as a genuine HTTP 200 with a truncated or
+        # otherwise undecodable body (looked like a race with NOAA's own
+        # publish process). The client should treat that the same as a 404
+        # and fall back to the next older timestamp, not surface a hard
+        # failure for a frame that will likely be fine moments later.
+        valid_bytes = _valid_image_bytes()
+        requested_urls = []
+
+        def transport(request: Request, _timeout: float) -> bytes:
+            requested_urls.append(request.full_url)
+            if "20262360351" in request.full_url:
+                return b"\xff\xd8\xff\xe0not actually a complete jpeg"
+            return valid_bytes
+
+        client = GoesDustClient(transport=transport)
+        now = datetime(2026, 8, 24, 3, 53, 16, tzinfo=timezone.utc)
+
+        body, frame_time = client.latest_frame(now=now)
+
+        self.assertEqual(body, valid_bytes)
+        self.assertEqual(frame_time, datetime(2026, 8, 24, 3, 46, tzinfo=timezone.utc))
+        self.assertEqual(len(requested_urls), 2)
 
     def test_gives_up_after_the_lookback_window_is_exhausted(self) -> None:
         def transport(request: Request, _timeout: float) -> bytes:
