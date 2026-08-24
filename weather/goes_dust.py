@@ -1,6 +1,7 @@
 import io
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
+from time import sleep
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -80,6 +81,8 @@ class GoesDustClient:
     image_size = 1200
     update_interval_minutes = 5
     max_lookback_attempts = 6  # ~30 minutes of publish-latency tolerance
+    retries_per_timestamp = 3  # absorbs a brief connection hiccup, not just a bad timestamp
+    retry_delay_seconds = 1.5
 
     def __init__(
         self,
@@ -88,12 +91,15 @@ class GoesDustClient:
         band: str = "Dust",
         timeout_seconds: float = 10.0,
         transport: Transport | None = None,
+        retry_delay_seconds: float | None = None,
     ) -> None:
         self._satellite = satellite
         self._sector = sector
         self._band = band
         self._timeout_seconds = timeout_seconds
         self._transport = transport or _default_transport
+        if retry_delay_seconds is not None:
+            self.retry_delay_seconds = retry_delay_seconds
 
     def latest_frame(self, now: datetime | None = None) -> tuple[bytes, datetime] | None:
         # NOAA publishes on a schedule offset by one minute from a clean
@@ -115,32 +121,47 @@ class GoesDustClient:
         return None
 
     def _try_fetch(self, timestamp: datetime) -> bytes | None:
+        # A 404 means this timestamp genuinely isn't published - retrying it
+        # won't help, so fall straight back to an older one. Anything else
+        # (a network error, or a fetched body that fails to decode) could be
+        # a brief connection hiccup rather than something wrong with this
+        # specific timestamp, so retry it a couple times in place first -
+        # observed in practice that a corrupted/truncated read is often
+        # transient and a retry moments later succeeds.
         request = Request(self._image_url(timestamp))
         request.add_header("Accept", "image/jpeg")
         request.add_header("User-Agent", "conway-led-matrix/0.1")
-        try:
-            body = self._transport(request, self._timeout_seconds)
-        except HTTPError as error:
-            if error.code == 404:
-                return None
-            raise GoesDustError(f"NOAA STAR API returned HTTP {error.code}") from error
-        except (OSError, URLError) as error:
-            raise GoesDustError("could not reach NOAA STAR API") from error
-        if not self._is_valid_image(body):
-            # Observed in practice: the very freshest timestamp occasionally
-            # comes back corrupted/truncated, seemingly a race with NOAA's
-            # own publish process rather than anything on our end (a retry
-            # moments later for the same timestamp succeeds fine). Treat it
-            # like a 404 - this timestamp isn't usable yet - and fall back
-            # to the next older one instead of surfacing a hard failure.
-            return None
-        return body
+        last_network_error: GoesDustError | None = None
+        for attempt in range(self.retries_per_timestamp):
+            if attempt:
+                sleep(self.retry_delay_seconds)
+            try:
+                body = self._transport(request, self._timeout_seconds)
+            except HTTPError as error:
+                if error.code == 404:
+                    return None
+                last_network_error = GoesDustError(
+                    f"NOAA STAR API returned HTTP {error.code}"
+                )
+                continue
+            except (OSError, URLError):
+                last_network_error = GoesDustError("could not reach NOAA STAR API")
+                continue
+            if self._is_valid_image(body):
+                return body
+            last_network_error = None
+        if last_network_error is not None:
+            raise last_network_error
+        return None
 
     @staticmethod
     def _is_valid_image(body: bytes) -> bool:
+        # Uses the same open()+load() path _store_dust actually decodes
+        # with (not the lighter-weight verify()), so "validated OK" here
+        # can't diverge from "actually usable" there.
         try:
             with Image.open(io.BytesIO(body)) as image:
-                image.verify()
+                image.load()
             return True
         except Exception:
             return False
