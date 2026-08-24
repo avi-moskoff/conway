@@ -1,6 +1,7 @@
 import hashlib
 import io
 import logging
+import os
 import socket
 from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor
@@ -37,6 +38,27 @@ def _decode_jpeg(body: bytes) -> np.ndarray | None:
         return None
 
 
+def _reset_worker_scheduling() -> None:
+    """Runs once, when a decode worker process starts (ProcessPoolExecutor
+    initializer) - undoes the real-time scheduling policy and single-core
+    CPU affinity this process otherwise inherits from the parent (run.sh:
+    chrt -f 90 taskset -c 3). The main process needs those for smooth LED
+    matrix timing, but a worker that inherits them would still be fighting
+    the matrix's own real-time refresh thread for the same single core,
+    defeating the point of moving decode out of that process. Not fatal if
+    unavailable/unpermitted (e.g. off Linux, or a restricted environment) -
+    decode still works, just without this optimization.
+    """
+    try:
+        os.sched_setaffinity(0, set(range(os.cpu_count() or 1)))
+    except (AttributeError, OSError) as error:
+        logger.warning("Dust decode worker: could not reset CPU affinity: %s", error)
+    try:
+        os.sched_setscheduler(0, os.SCHED_OTHER, os.sched_param(0))
+    except (AttributeError, OSError) as error:
+        logger.warning("Dust decode worker: could not reset scheduling policy: %s", error)
+
+
 _decode_executor: ProcessPoolExecutor | None = None
 _decode_timeout_seconds = 15.0
 
@@ -60,14 +82,27 @@ def _decode_via_subprocess(body: bytes) -> np.ndarray | None:
     # whatever RGBMatrix has already done to it - regardless of whether
     # RGBMatrix has been constructed yet when this first runs.
     global _decode_executor
-    if _decode_executor is None:
-        _decode_executor = ProcessPoolExecutor(max_workers=1, mp_context=get_context("spawn"))
     try:
+        if _decode_executor is None:
+            _decode_executor = ProcessPoolExecutor(
+                max_workers=1,
+                mp_context=get_context("spawn"),
+                initializer=_reset_worker_scheduling,
+            )
         return _decode_executor.submit(_decode_jpeg, body).result(
             timeout=_decode_timeout_seconds
         )
     except Exception as error:
-        logger.warning("Dust decode worker error: %s: %s", type(error).__name__, error)
+        logger.warning(
+            "Dust decode worker error (%s: %s) - recreating worker process",
+            type(error).__name__, error,
+        )
+        # Whatever failed - pool creation, a dead/broken worker, a timeout -
+        # don't stay stuck with a broken singleton for the rest of this
+        # process's lifetime. The next call gets a fresh pool.
+        if _decode_executor is not None:
+            _decode_executor.shutdown(wait=False, cancel_futures=True)
+        _decode_executor = None
         return None
 
 

@@ -406,7 +406,11 @@ class WeatherRadarGame(Game):
                 failures += 1
                 with self._data_lock:
                     self._has_dust_error = True
-                logger.warning("Weather radar dust poll failed: %s", error)
+                # exc_info: this poll only runs every 5-10 minutes, so the
+                # log volume is low, and a full traceback is what actually
+                # let us track down the last couple of failures here (e.g.
+                # a bare "[Errno 32] Broken pipe" with no context otherwise).
+                logger.warning("Weather radar dust poll failed: %s", error, exc_info=True)
                 wait_seconds = self._exponential_backoff_seconds(
                     failures, self._config.dust_poll_seconds
                 )
