@@ -38,8 +38,6 @@ class WeatherRadarGame(Game):
     display_modes = ("conditions", "aqi", "dust")
     grid_size = 5
 
-    home_color = (255, 0, 255)
-    landmark_color = (90, 90, 90)
     error_color = (255, 0, 0)
     ticker_text_color = (255, 255, 255)
 
@@ -298,10 +296,14 @@ class WeatherRadarGame(Game):
             show_error = has_dust_error and not stale
             landmark_pixels = self._dust_landmark_pixels
 
+        # Inverting whatever's already there (instead of painting a fixed
+        # color) guarantees these markers stand out regardless of what the
+        # field underneath looks like - NASA's dust imagery in particular
+        # leans heavily blue/white, which would wash out most fixed colors.
         for x, y in landmark_pixels:
-            frame[y, x] = self.landmark_color
+            frame[y, x] = 255 - frame[y, x]
         center_x, center_y = self.width // 2, self._radar_height // 2
-        frame[center_y, center_x] = self.home_color
+        frame[center_y, center_x] = 255 - frame[center_y, center_x]
         if show_error:
             frame[0, 0] = self.error_color
         self._draw_ticker(frame, label)

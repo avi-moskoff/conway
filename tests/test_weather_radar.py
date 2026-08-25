@@ -91,8 +91,13 @@ class WeatherRadarGameTests(unittest.TestCase):
     def test_home_marker_and_landmark_render(self) -> None:
         self._seed()
         frame = self.game.frame
-        self.assertTrue(np.any(np.all(frame == self.game.home_color, axis=2)))
-        self.assertTrue(np.any(np.all(frame == self.game.landmark_color, axis=2)))
+        underlying_field = self.game._conditions_field
+        center_x, center_y = self.game.width // 2, self.game._radar_height // 2
+        home_pixel = 255 - underlying_field[center_y, center_x]
+        np.testing.assert_array_equal(frame[center_y, center_x], home_pixel)
+        landmark_x, landmark_y = self.game._landmark_pixels[0]
+        landmark_pixel = 255 - underlying_field[landmark_y, landmark_x]
+        np.testing.assert_array_equal(frame[landmark_y, landmark_x], landmark_pixel)
 
     def test_reset_cycles_conditions_aqi_dust_and_wraps(self) -> None:
         self.assertEqual(
@@ -177,8 +182,13 @@ class WeatherRadarGameTests(unittest.TestCase):
         self.game.reset()  # -> aqi
         self.game.reset()  # -> dust
         frame = self.game.frame
-        self.assertTrue(np.any(np.all(frame == self.game.home_color, axis=2)))
-        self.assertTrue(np.any(np.all(frame == self.game.landmark_color, axis=2)))
+        underlying_field = self.game._dust_field
+        center_x, center_y = self.game.width // 2, self.game._radar_height // 2
+        home_pixel = 255 - underlying_field[center_y, center_x]
+        np.testing.assert_array_equal(frame[center_y, center_x], home_pixel)
+        landmark_x, landmark_y = self.game._dust_landmark_pixels[0]
+        landmark_pixel = 255 - underlying_field[landmark_y, landmark_x]
+        np.testing.assert_array_equal(frame[landmark_y, landmark_x], landmark_pixel)
 
     def test_stale_dust_data_shows_no_signal(self) -> None:
         self._seed()

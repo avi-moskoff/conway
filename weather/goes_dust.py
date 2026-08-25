@@ -1,4 +1,3 @@
-import hashlib
 import io
 import logging
 import socket
@@ -232,11 +231,10 @@ class GoesDustClient:
     def _try_fetch(self, timestamp: datetime) -> np.ndarray | None:
         # A 404 means this timestamp genuinely isn't published - retrying it
         # won't help, so fall straight back to an older one. Anything else
-        # (a network error, or a fetched body that fails to decode) could be
-        # a brief connection hiccup rather than something wrong with this
-        # specific timestamp, so retry it a couple times in place first -
-        # observed in practice that a corrupted/truncated read is often
-        # transient and a retry moments later succeeds.
+        # (a network error, or a fetched body that fails to decode) is
+        # ordinary transient-failure territory - a brief connection hiccup,
+        # not something wrong with this specific timestamp - so retry it a
+        # couple times in place before giving up on it too.
         url = self._image_url(timestamp)
         request = Request(url)
         request.add_header("Accept", "image/jpeg")
@@ -267,18 +265,13 @@ class GoesDustClient:
                 )
                 last_network_error = GoesDustError("could not reach NOAA STAR API")
                 continue
-            digest = hashlib.sha256(body).hexdigest()[:16]
             decoded = self._decode(body)
             if decoded is not None:
-                logger.info(
-                    "Dust fetch %s: OK (%d bytes, sha256=%s)", timestamp, len(body), digest
-                )
+                logger.info("Dust fetch %s: OK (%d bytes)", timestamp, len(body))
                 return decoded
             logger.warning(
-                "Dust fetch %s attempt %d/%d: %d bytes but failed to decode, "
-                "sha256=%s, starts with %r",
-                timestamp, attempt + 1, self.retries_per_timestamp,
-                len(body), digest, body[:32],
+                "Dust fetch %s attempt %d/%d: %d bytes but failed to decode",
+                timestamp, attempt + 1, self.retries_per_timestamp, len(body),
             )
             last_network_error = None
         if last_network_error is not None:
