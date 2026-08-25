@@ -144,6 +144,14 @@ class WeatherRadarGame(Game):
         self._dust_sector_x, self._dust_sector_y = self._build_dust_sector_pixels(
             dust_pixel_east, dust_pixel_north
         )
+        logger.info(
+            "Weather radar landmarks: %s configured -> %s in-frame at %.0fnm, %s in-frame at %.0fnm (dust)",
+            config.landmarks,
+            self._landmark_pixels,
+            config.radius_nm,
+            self._dust_landmark_pixels,
+            config.dust_radius_nm,
+        )
 
     def _build_query_points(
         self, max_east: float, max_north: float
