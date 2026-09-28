@@ -31,6 +31,12 @@ class FakeDevice:
 
 class FakeDisplay:
     def __init__(self, _height, _width, rotation: int = 90) -> None:
+        # What was already cached the moment the "matrix" came into
+        # existence - the real RGBMatrix drops root here, after which
+        # uncached fonts can no longer be read (see preload_fonts).
+        from games import fonts
+
+        self.fonts_cached_at_init = set(fonts._cache)
         self.frames = 0
         self.shown_frames: list = []
         self.is_off = False
@@ -289,6 +295,21 @@ class BootScreenTests(unittest.TestCase):
                     runner.display.shown_frames, expected_frames
                 ):
                     np.testing.assert_array_equal(shown, expected)
+
+    def test_every_font_is_cached_before_the_matrix_is_constructed(self) -> None:
+        # Regression: RGBMatrix drops root privileges when constructed, so
+        # a font first loaded after that fails with "cannot open resource"
+        # on real hardware. Clear the cache so this can't pass just
+        # because an earlier test already loaded the fonts.
+        from games import fonts
+
+        fonts._cache.clear()
+        with patch.dict("os.environ", {}, clear=True):
+            with patched_runner(None) as runner:
+                self.assertEqual(
+                    runner.display.fonts_cached_at_init,
+                    {"unscii-8.ttf:8", "unscii-16.ttf:16"},
+                )
 
     def test_a_caller_supplied_roster_is_left_alone(self) -> None:
         # The boot seed is specifically for the real default roster - a

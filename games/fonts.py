@@ -42,3 +42,15 @@ def boot_font() -> ImageFont.FreeTypeFont:
     design doc's Boot sequence section.
     """
     return _load("unscii-16.ttf", 16)
+
+
+def preload_fonts() -> None:
+    """Load and cache every font up front. GameRunner calls this before
+    constructing MatrixDisplay: RGBMatrix drops root privileges to the
+    unprivileged `daemon` user as soon as it's built, and that user can't
+    read these files out of /home/avi - so any font first loaded after
+    that point fails with PIL's generic "cannot open resource". Cached
+    fonts survive the privilege drop; uncached ones don't.
+    """
+    ticker_font()
+    boot_font()

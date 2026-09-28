@@ -18,6 +18,7 @@ from games import (
     WeatherRadarGame,
     boot_seed_frame,
 )
+from games.fonts import preload_fonts
 from games.menu import ScreenMenu
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,11 @@ class GameRunner:
         # WeatherRadarGame alone is real seconds of numpy work on a Pi
         # Zero 2 W), is what lets a real, incrementally-updated bar be
         # seen at all. See the design doc's Boot sequence section.
+        # Fonts must be loaded (and cached) before the matrix exists:
+        # RGBMatrix drops root privileges as soon as it's constructed, and
+        # the unprivileged user it drops to can't read /home/avi. See
+        # games.fonts.preload_fonts.
+        preload_fonts()
         rotation = int(os.getenv("CONWAY_DISPLAY_ROTATION", "180"))
         self.display = MatrixDisplay(self.HEIGHT, self.WIDTH, rotation=rotation)
 
