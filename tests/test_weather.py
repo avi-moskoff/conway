@@ -4,7 +4,13 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 
 from config import WeatherRadarConfig
-from weather.open_meteo import OpenMeteoClient, OpenMeteoError
+from weather.open_meteo import (
+    OpenMeteoApiError,
+    OpenMeteoClient,
+    OpenMeteoConnectionError,
+    OpenMeteoError,
+    OpenMeteoRateLimitedError,
+)
 
 
 class OpenMeteoClientWeatherTests(unittest.TestCase):
@@ -93,6 +99,46 @@ class OpenMeteoClientWeatherTests(unittest.TestCase):
 
         client = OpenMeteoClient(transport=failing_transport)
         with self.assertRaises(OpenMeteoError):
+            client.weather_for([(33.4, -112.0)])
+
+    def test_non_rate_limit_http_error_is_an_api_error(self) -> None:
+        # Distinguishing connection/API/rate-limit failures is what lets
+        # WeatherRadarGame show a specific ticker reason instead of a bare
+        # "NO SIGNAL" - see the design doc's Error & degraded-state
+        # handling section.
+        def failing_transport(_request, _timeout):
+            raise HTTPError("url", 500, "server error", {}, None)
+
+        client = OpenMeteoClient(transport=failing_transport)
+        with self.assertRaises(OpenMeteoApiError):
+            client.weather_for([(33.4, -112.0)])
+
+    def test_429_raises_rate_limited_error_with_retry_after(self) -> None:
+        def failing_transport(_request, _timeout):
+            raise HTTPError(
+                "url", 429, "too many requests", {"Retry-After": "30"}, None
+            )
+
+        client = OpenMeteoClient(transport=failing_transport)
+        with self.assertRaises(OpenMeteoRateLimitedError) as context:
+            client.weather_for([(33.4, -112.0)])
+        self.assertEqual(context.exception.retry_after_seconds, 30.0)
+
+    def test_429_without_retry_after_still_raises_rate_limited_error(self) -> None:
+        def failing_transport(_request, _timeout):
+            raise HTTPError("url", 429, "too many requests", {}, None)
+
+        client = OpenMeteoClient(transport=failing_transport)
+        with self.assertRaises(OpenMeteoRateLimitedError) as context:
+            client.weather_for([(33.4, -112.0)])
+        self.assertIsNone(context.exception.retry_after_seconds)
+
+    def test_connection_failure_raises_connection_error(self) -> None:
+        def failing_transport(_request, _timeout):
+            raise OSError("network unreachable")
+
+        client = OpenMeteoClient(transport=failing_transport)
+        with self.assertRaises(OpenMeteoConnectionError):
             client.weather_for([(33.4, -112.0)])
 
 

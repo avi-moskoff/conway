@@ -1,0 +1,16 @@
+Unscii (unscii-8.ttf, unscii-16.ttf)
+Author: Viznut (Ville-Matias Heikkila)
+Source: https://github.com/viznut/unscii
+Commit: 257b4dfeb50651510fe8b9cf4f151a148a4490e4 (2021-02-24)
+Homepage: http://viznut.fi/unscii/
+
+Public Domain / CC0, per the upstream README:
+
+  "Licensing: You can consider it Public Domain (or CC-0) except for the
+  files derived from or containing parts of Roman Czyborra's Unifont
+  project (unifont.hex, hex2bdf.pl, unscii-16-full.*) which fall under
+  GPL."
+
+unscii-8.ttf and unscii-16.ttf (vendored here) are NOT part of the
+Unifont-derived set, so they carry no GPL obligation - only the separate
+unscii-16-full variant (not used by this project) does.

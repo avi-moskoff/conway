@@ -1,21 +1,86 @@
-# Conway LED Matrix
+# Conway
 
 > Note on AI usage: This project was made for fun, and I used AI when I thought it would make the project more fun to do so.
 
-An interactive animation runner for a 64×64 HUB75 RGB LED matrix. It currently
-includes:
+A 64×64 HUB75 RGB LED matrix display for a Raspberry Pi. It started as a
+Conway's Game of Life simulator, which is where the name comes from, and has
+grown into a small ambient display: a rotary encoder flips between generative
+animations and live views of what is happening around a configured home
+location, including aircraft overhead, light-rail arrivals, weather, air
+quality, and satellite dust imagery.
 
-- Conway's Game of Life
-- Langton's Ant on a randomized board
-- A boids flocking simulation
-- An optional live aircraft radar powered by adsb.lol
-- An optional weather radar, cycling between air quality and current
-  conditions, powered by Open-Meteo
+Press the rotary encoder in to open the screen switcher: a vertical list of
+every screen, with the current one highlighted. Turn the encoder to move the
+highlight and press it in again to switch to it, closing the switcher; the
+button light blinks while the switcher is open. Each screen keeps its state
+while it's inactive, so switching back resumes where it left off.
 
-Turn the rotary encoder to switch games. Each game keeps its state while it is
-inactive, so switching back resumes where it left off. Press the illuminated
-button to reset the active game. The button lights while the program is running.
-When the program exits, it clears the matrix and turns off the button light.
+While the switcher is closed, the encoder and button instead act on the active
+screen: turning the encoder cycles through that screen's own views for the two
+live screens (see [Live views](#live-views) below) - the three animations have
+only one view each, so rotating does nothing there. The button always means
+the same thing everywhere: force-refresh what's showing - a fresh random start
+for an animation, or an immediate retry of the current view's poll for a live
+view - and it does nothing while the switcher is open. The button lights while
+the program is running. When the program exits, it clears the matrix and turns
+off the button light.
+
+## Screens
+
+The switcher lists the screens in the order given here. The two live
+screens are added only when a home location is configured (see
+[Configuration](#configuration)); without one, the display runs just the three
+animations.
+
+### Animations
+
+- **Conway's Game of Life** starts from a random board that wraps at the edges.
+  The button deals a new random board.
+- **Langton's Ant** follows a cyan ant across a blank board, starting from the
+  center. The button clears the board and returns the ant to the center.
+- **Boids** is a flock of 36 white boids steering around eight red obstacle
+  pixels. The button scatters a new flock and new obstacles.
+
+### Live views
+
+The live screens are north-up maps centered on your home location, drawn above
+a 12-pixel text ticker. Short labels stay centered and longer ones scroll. A
+single red pixel in the top-left corner means the latest poll of the current
+view's data source failed, so what you see may be out of date. A live screen
+polls its data source only while it is selected.
+
+**Flight radar** has three views, and the encoder cycles through them while it's the active screen:
+
+- *Aircraft* shows nearby aircraft from [adsb.lol](https://adsb.lol/). The
+  closest aircraft is red and the rest are white. Home is the red center pixel,
+  and an optional airport appears as a red pixel too. The ticker shows the
+  closest aircraft's callsign and, when one is available, its estimated route
+  (for example `ABC123 PHX>LAX`). It reads `CLEAR SKY` when nothing is in range
+  and `NO SIGNAL` when the data is stale.
+- *Westbound ETA* and *Eastbound ETA* show Valley Metro light rail. The A Line
+  and Streetcar tracks are drawn in blue, with eastbound trains in green and
+  westbound trains in yellow. The next train due at the A Line station nearest
+  home is drawn red, and the ticker counts down to it (`W ETA 4M`, `E ETA <1M`,
+  or `--` when no arrival is known). It reads `NO RAIL` when the feed is stale.
+  The track and station data is hardcoded for Valley Metro's Phoenix-Tempe-Mesa
+  service, so these views are only useful near it.
+
+**Weather radar** also has three views, and the encoder cycles through them the same way:
+
+- *Conditions* shows temperature and a black→blue→white precipitation field,
+  with a ticker such as `72F CLEAR`.
+- *Air quality* colors the map on the EPA US AQI scale, from green through
+  yellow, orange, red, and purple to maroon, with a ticker such as
+  `AQI 42 GOOD`.
+- *Dust* is a live GOES satellite Dust RGB crop, for watching a dust storm or
+  haboob approach. The ticker shows the image time in UTC (`DUST 18:31Z`).
+
+The conditions and air-quality fields are interpolated from a small grid of
+points around home, so they read as a continuous map at the same north-up scale
+as the radar. Home and each configured landmark are single pixels drawn by
+inverting the color underneath, so they stand out against any field. Switching
+weather views also nudges the poller for the view you switch into, so one that
+is waiting out a retry backoff after a failure tries again immediately.
 
 ## Hardware
 
@@ -39,6 +104,7 @@ GPIO numbers below use BCM numbering.
 │ GPIO 15 ── red wire ──────────│── resistor ── button light ── GND
 │ GPIO 18 ── yellow wire ───────│── Encoder A
 │ GPIO 19 ── white wire ────────│── Encoder B
+│ GPIO 25 ── ? wire ────────────│── Encoder push switch
 │ GND ──────────────────────────│── Encoder common
 │                               │
 │ Bonnet HUB75 output ──────────│── HUB75 ribbon ── 64×64 matrix
@@ -47,9 +113,11 @@ GPIO numbers below use BCM numbering.
 ```
 
 Wire colors in this document identify the physical wiring, not the colors of
-the components. The button light needs an appropriate current-limiting resistor
-unless one is built into the button. The `gpiozero` inputs use pull-ups, so the
-button switch and encoder common connect to ground.
+the components (the encoder push switch's wire color above is a placeholder -
+fill in the actual color for your build). The button light needs an
+appropriate current-limiting resistor unless one is built into the button. The
+`gpiozero` inputs use pull-ups, so the button switch, encoder push switch, and
+encoder common connect to ground.
 
 ### Important: solder the E-address jumper
 
@@ -80,12 +148,13 @@ this project.
 
 ## Controls
 
-| Control       | GPIO | Wire   | Action                    |
-| ------------- | ---: | ------ | ------------------------- |
-| Button switch |   14 | Green  | Reset the active game     |
-| Button light  |   15 | Red    | Program-running indicator |
-| Encoder A     |   18 | Yellow | Select a game             |
-| Encoder B     |   19 | White  | Select a game             |
+| Control            | GPIO | Wire   | Action                                                      |
+| ------------------ | ---: | ------ | ----------------------------------------------------------- |
+| Button switch      |   14 | Green  | Force-refresh the active screen (new board, retry a poll)   |
+| Button light       |   15 | Red    | Program-running indicator; blinks while the switcher is open |
+| Encoder A          |   18 | Yellow | Cycle the active screen's views, or move the switcher's highlight |
+| Encoder B          |   19 | White  | Cycle the active screen's views, or move the switcher's highlight |
+| Encoder push switch|   25 | ?      | Open the switcher, or confirm the highlighted screen         |
 
 ## Software setup
 
@@ -147,79 +216,72 @@ uv pip install --no-build-isolation \
     git+https://github.com/hzeller/rpi-rgb-led-matrix
 ```
 
-### Running
+## Configuration
 
-The flight-radar game is included when both home coordinates are configured.
-Keep them outside the repository by putting them in `/etc/conway.env`:
+Settings come from environment variables. Under systemd they are read from
+`/etc/conway.env`, which keeps your home coordinates out of the repository. For
+example:
 
 ```text
 CONWAY_HOME_LATITUDE=...
 CONWAY_HOME_LONGITUDE=...
 CONWAY_AIRPORT_LATITUDE=...
 CONWAY_AIRPORT_LONGITUDE=...
-CONWAY_FLIGHT_RADIUS_NM=8
-CONWAY_ADSB_POLL_SECONDS=15
-CONWAY_LOG_LEVEL=INFO
+CONWAY_WEATHER_LANDMARKS=Camelback Mountain:33.5205:-111.9648;South Mountain:33.3306:-112.0533
 ```
 
-Every game's frame is rotated before it reaches the matrix, to match however the
-panel ends up mounted. Set `CONWAY_DISPLAY_ROTATION` to `0`, `90`, `180`, or
-`270` degrees clockwise; it defaults to `180` (the panel is mounted upside
-down).
+Setting the two home coordinates enables both live screens; setting only one
+is an error. Everything else is optional and falls back to the default shown.
+
+| Variable                                        | Default                  | Notes                                                                     |
+| ----------------------------------------------- | ------------------------ | ------------------------------------------------------------------------- |
+| `CONWAY_HOME_LATITUDE`, `CONWAY_HOME_LONGITUDE` | unset (live views off)   | Center of every live map.                                                 |
+| `CONWAY_DISPLAY_ROTATION`                       | `180`                    | Degrees clockwise (`0`, `90`, `180`, `270`) applied to every screen.       |
+| `CONWAY_LOG_LEVEL`                              | `INFO`                   | `DEBUG`, `INFO`, `WARNING`, and so on.                                    |
+| `CONWAY_FLIGHT_RADIUS_NM`                       | `8`                      | Map radius for the aircraft and rail views (1-250).                       |
+| `CONWAY_ADSB_POLL_SECONDS`                      | `15`                     | Aircraft poll interval (minimum 5).                                       |
+| `CONWAY_AIRPORT_LATITUDE`, `CONWAY_AIRPORT_LONGITUDE` | unset              | Optional; set both. Marks an airport on the aircraft map.                 |
+| `CONWAY_ADSB_API_URL`, `CONWAY_ADSB_API_KEY`    | `https://api.adsb.lol`, none | Point at another compatible endpoint.                                 |
+| `CONWAY_RAIL_POLL_SECONDS`                      | `15`                     | Rail poll interval (minimum 5).                                           |
+| `CONWAY_RAIL_API_URL`, `CONWAY_RAIL_TRIP_UPDATES_URL`, `CONWAY_RAIL_API_KEY` | Valley Metro's public feeds | Override the GTFS-realtime vehicle and trip-update feeds and key. |
+| `CONWAY_WEATHER_RADIUS_NM`                      | `15`                     | Map radius for conditions and air quality (1-250).                        |
+| `CONWAY_WEATHER_POLL_SECONDS`                   | `600`                    | Conditions and air-quality poll interval (minimum 60).                    |
+| `CONWAY_WEATHER_LANDMARKS`                      | none                     | Semicolon-separated `Name:latitude:longitude` entries.                    |
+| `CONWAY_DUST_RADIUS_NM`                         | `40`                     | Map radius for the dust view (1-250).                                     |
+| `CONWAY_DUST_POLL_SECONDS`                      | `300`                    | Dust imagery poll interval (minimum 60).                                  |
+| `CONWAY_DUST_SATELLITE`                         | `GOES19`                 | GOES satellite to fetch imagery from.                                     |
+
+### Aircraft
 
 The airport coordinates are optional. When present and within the displayed
-radius, the airport appears as a green pixel. The closest aircraft is yellow
-to match its ticker label; other aircraft are white and the installation is the
-blue center pixel. The label includes the callsign and estimated route when one
-is available and adsb.lol marks it plausible. Short labels remain centered
-while longer labels scroll.
+radius, the airport appears as a red pixel. Routes are inferred from callsigns
+and shown only when adsb.lol has route data and marks it plausible.
 
-Routine successful API polls are logged only at `DEBUG`, so the default
-`INFO` level records startup, game changes, and failures without writing a
-message every polling interval. Set `CONWAY_LOG_LEVEL=WARNING` for only
-problems, or temporarily use `DEBUG` while troubleshooting. When running as a
-service, these messages go to systemd-journald; inspect its current footprint
-with `journalctl --disk-usage`.
+The public [adsb.lol](https://adsb.lol/) service is used by default. Aircraft
+positions come from community receivers, so coverage can vary. Origin and
+destination labels are not broadcast by the aircraft and should be treated as
+best-effort.
 
-The optional settings `CONWAY_ADSB_API_URL` and `CONWAY_ADSB_API_KEY` make it
-possible to switch to another compatible endpoint later. The public
-[adsb.lol](https://adsb.lol/) service is used by default. Aircraft positions
-come from community receivers, so coverage can vary. Origin and destination
-labels are inferred from callsigns when route data is available; they are not
-broadcast by the aircraft and should be treated as best-effort.
-
-The radar makes no requests while another game is selected. Its aircraft and
+The radar makes no requests while another screen is selected. Its aircraft and
 route caches live only in RAM, and neither coordinates nor aircraft history are
 written to disk by the application.
 
-The weather-radar game is included whenever the same `CONWAY_HOME_LATITUDE`/
-`CONWAY_HOME_LONGITUDE` are set. It samples a small grid of points around home
-and interpolates them into a continuous field, the same north-up scale as the
-flight radar. Press the reset button to cycle between current conditions
-(temperature and a black→blue→white precipitation field), air quality (a
-green→yellow→orange→red→purple→maroon field on the EPA US AQI scale), and a
-live GOES satellite Dust RGB crop (for watching a dust storm/haboob
-approach). A dim gray dot marks each configured landmark, giving the map a
-sense of scale; a bright center pixel marks home.
+### Rail
 
-```text
-CONWAY_WEATHER_RADIUS_NM=15
-CONWAY_WEATHER_POLL_SECONDS=600
-CONWAY_WEATHER_LANDMARKS=Camelback Mountain:33.5205:-111.9648;South Mountain:33.3306:-112.0533
-CONWAY_DUST_RADIUS_NM=40
-CONWAY_DUST_POLL_SECONDS=300
-CONWAY_DUST_SATELLITE=GOES19
-```
+Train positions and arrivals come from Valley Metro's public GTFS-realtime
+feeds. The default API key is the one Phoenix publishes in its open-data
+catalog rather than a private credential; set `CONWAY_RAIL_API_KEY` to use your
+own.
 
-`CONWAY_WEATHER_LANDMARKS` is optional and semicolon-separated, each entry
-formatted `Name:latitude:longitude`. All other settings are optional and fall
-back to the defaults shown above. Weather and air-quality data come from the
-free [Open-Meteo](https://open-meteo.com/) APIs, which need no API key.
+### Weather and dust
+
+Weather and air-quality data come from the free
+[Open-Meteo](https://open-meteo.com/) APIs, which need no API key.
 
 The dust view uses a larger default radius (`CONWAY_DUST_RADIUS_NM`) than the
-conditions/AQI views: its source imagery is coarser (roughly 1.2-1.4 km per
-pixel near the US Southwest) than the interpolated Open-Meteo fields, so a
-tighter radius would just look blocky. It's currently only calibrated for the
+conditions and air-quality views: its source imagery is coarser (roughly 1.2-1.4
+km per pixel near the US Southwest) than the interpolated Open-Meteo fields, so
+a tighter radius would just look blocky. It's currently only calibrated for the
 "Southern Rockies" region (Arizona and nearby) - see the comment above the
 calibration constants in `weather/goes_dust.py` for how that calibration was
 derived and how to redo it for a different area. `CONWAY_DUST_SATELLITE`
@@ -229,6 +291,17 @@ exists because GOES satellites occasionally get swapped out operationally
 re-derive the calibration the same way - normal satellite station-keeping
 drift is far too small to matter, but an operational swap changes the image
 source entirely.
+
+### Logging
+
+Routine successful API polls are logged only at `DEBUG`, so the default
+`INFO` level records startup, screen changes, and failures without writing a
+message every polling interval. Set `CONWAY_LOG_LEVEL=WARNING` for only
+problems, or temporarily use `DEBUG` while troubleshooting. When running as a
+service, these messages go to systemd-journald; inspect its current footprint
+with `journalctl --disk-usage`.
+
+## Running
 
 Run the entry point with the permissions required by the RGB matrix driver:
 
@@ -265,6 +338,34 @@ restarting:
 ```sh
 sudo systemctl daemon-reload
 sudo systemctl restart conway
+```
+
+## Project layout
+
+- `main.py`, `runner.py`, `display.py`, `config.py`: the entry point, the runner
+  that hosts one screen at a time and handles the encoder and button, the
+  matrix output (including rotation), and environment-driven configuration.
+- `games/`: one `Game` subclass per screen (`conway.py`, `langton.py`,
+  `boids.py`, `flight_radar.py`, `weather_radar.py`).
+- `air_traffic/`: the adsb.lol client and the map-projection math shared by the
+  radar views.
+- `transit/`: the Valley Metro GTFS-realtime client and static track and station
+  data.
+- `weather/`: the Open-Meteo and GOES dust clients.
+- `tests/`: unit tests that stub out the GPIO and matrix hardware.
+
+To add a screen, subclass `games.base.Game`: implement `frame`, `reset`, and
+`advance`; set `menu_label` to how it should read in the switcher (8
+characters or fewer - `games/menu.py`'s font doesn't scroll); and optionally
+override `activate`, `deactivate`, and `close` for anything that polls a
+network service, and `cycle_view` if the screen has more than one view.
+Every game must be 64×64. Then register it in `GameRunner._default_games` in
+`runner.py`.
+
+Run the tests from the repository root with:
+
+```sh
+python -m unittest discover -s tests
 ```
 
 ## Data sources

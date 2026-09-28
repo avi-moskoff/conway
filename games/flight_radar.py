@@ -6,7 +6,7 @@ from time import monotonic
 from time import time as wall_clock_time
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
 from air_traffic import AdsbLolClient, Aircraft, FlightRoute, RateLimitedError
 from air_traffic.projection import (
@@ -18,7 +18,8 @@ from air_traffic.projection import (
     project_position,
 )
 from config import FlightRadarConfig
-from games.base import Game
+from games.base import Game, invert_pixel, mark_error
+from games.ticker import Ticker
 from transit import (
     DIRECTION_BY_ROUTE_AND_ID,
     LINE_GEOMETRY,
@@ -35,6 +36,7 @@ class FlightRadarGame(Game):
     """North-up view of live aircraft near the configured location."""
 
     frame_delay_seconds = 0.1
+    menu_label = "FLIGHT"
     ticker_height = 12
     maximum_position_age_seconds = 60.0
     rail_maximum_position_age_seconds = 90.0
@@ -48,10 +50,18 @@ class FlightRadarGame(Game):
     # Aircraft mode and rail modes never draw at the same time (see frame),
     # so within a mode there's only ever a handful of categories that need
     # to be distinct from each other, not from every color in the whole app.
+    # Red stays reserved for signal (the one thing worth looking at
+    # first); home and error are drawn by inverting whatever's already
+    # underneath instead of a fixed color - see games.base.invert_pixel
+    # / mark_error.
     featured_aircraft_color = (255, 0, 0)
-    airport_color = (255, 0, 0)
-    home_color = (255, 0, 0)
-    error_color = (255, 0, 0)
+    # Matches rail_line_color: both are fixed infrastructure landmarks,
+    # and aircraft/rail modes are never drawn together (see the class
+    # comment above), so this is the same intentional per-mode reuse as
+    # eastbound/westbound train colors would be if aircraft mode used
+    # them - a single-channel primary, safe for an isolated pixel, that
+    # means one specific thing within whichever mode is on screen.
+    airport_color = (0, 0, 255)
     other_aircraft_color = (255, 255, 255)
     eastbound_train_color = (0, 255, 0)
     westbound_train_color = (255, 230, 0)
@@ -96,11 +106,8 @@ class FlightRadarGame(Game):
         self._train_snapshot_time: float | None = None
         self._arrivals: tuple[StopArrival, ...] = ()
         self._has_rail_error = False
-        self._last_label = ""
-        self._scroll_offset = 0
-        self._ticker_scrolls = False
         self._display_mode_index = 0
-        self._font = ImageFont.load_default(size=12)
+        self._ticker = Ticker(self.width, self.ticker_height, self.ticker_text_color)
 
     def activate(self) -> None:
         if self._worker is None:
@@ -138,15 +145,37 @@ class FlightRadarGame(Game):
         logger.info("Flight radar polling stopped")
 
     def reset(self) -> None:
-        self._display_mode_index = (self._display_mode_index + 1) % len(
+        """Force-refresh the currently displayed view - the button's one
+        job everywhere now (see games.base.Game.cycle_view). Switching
+        views is the encoder's job; this never changes display_modes.
+        """
+        self._ticker.reset()
+        self._wake_active_poller()
+
+    def cycle_view(self, direction: int) -> None:
+        self._display_mode_index = (self._display_mode_index + direction) % len(
             self.display_modes
         )
-        self._scroll_offset = 0
-        self._wake_event.set()
+        self._ticker.reset()
+        self._wake_active_poller()
+
+    def _wake_active_poller(self) -> None:
+        # Aircraft and rail data are already polled continuously
+        # regardless of which mode is on screen (see _poll_loop /
+        # _rail_poll_loop), so this isn't required for either switching or
+        # refreshing - but it gives both actions a useful second job: force
+        # an immediate retry on whichever feed is currently visible, rather
+        # than waiting out a backoff after a transient failure. Only the
+        # poller behind the active mode, mirroring WeatherRadarGame's
+        # dust-vs-main split.
+        mode = self.display_modes[self._display_mode_index]
+        if mode == "aircraft":
+            self._wake_event.set()
+        else:
+            self._rail_wake_event.set()
 
     def advance(self) -> None:
-        if self._ticker_scrolls:
-            self._scroll_offset += 1
+        self._ticker.advance()
 
     @property
     def frame(self) -> np.ndarray:
@@ -194,10 +223,10 @@ class FlightRadarGame(Game):
         # so a train can still cover it if exactly coincident.
         if mode == "aircraft":
             self._draw_airport(frame, radar_height)
-            frame[center_y, center_x] = self.home_color
+            invert_pixel(frame, center_x, center_y)
         else:
             self._draw_rail_lines(frame, radar_height)
-            frame[center_y, center_x] = self.home_color
+            invert_pixel(frame, center_x, center_y)
             self._draw_trains(
                 frame,
                 radar_height,
@@ -272,10 +301,10 @@ class FlightRadarGame(Game):
         # an ADS-B hiccup has no business lighting up a train view.
         if mode == "aircraft":
             if has_error and not stale:
-                frame[0, 0] = self.error_color
+                mark_error(frame)
         elif has_rail_error and not rail_stale:
-            frame[0, 0] = self.error_color
-        self._draw_ticker(frame, label, letter_color)
+            mark_error(frame)
+        self._ticker.draw(frame, label, letter_color)
         return frame
 
     def _draw_airport(self, frame: np.ndarray, radar_height: int) -> None:
@@ -690,58 +719,3 @@ class FlightRadarGame(Game):
         longitude_scale = 60.0 * cos(radians(self._config.home_latitude))
         longitude = plane.longitude + east / longitude_scale
         return latitude, longitude
-
-    def _draw_ticker(
-        self,
-        frame: np.ndarray,
-        label: str,
-        letter_color: tuple[int, int, int] | None = None,
-    ) -> None:
-        if label != self._last_label:
-            self._scroll_offset = 0
-        self._last_label = label
-        canvas = Image.new("1", (self.width, self.ticker_height), 0)
-        draw = ImageDraw.Draw(canvas)
-        text_width = int(draw.textlength(label, font=self._font))
-        self._ticker_scrolls = text_width > self.width
-
-        # letter_color acts as a direction legend: the first character (e.g.
-        # "W"/"E") is drawn on its own canvas so it can be colored to match
-        # that direction's train color, while the rest stays the usual color.
-        letter_canvas = None
-        letter_draw = None
-        if letter_color is not None and label:
-            letter_canvas = Image.new("1", (self.width, self.ticker_height), 0)
-            letter_draw = ImageDraw.Draw(letter_canvas)
-
-        def draw_label(x: float) -> None:
-            if letter_draw is not None:
-                letter, rest = label[0], label[1:]
-                letter_draw.text((x, -1), letter, fill=1, font=self._font)
-                letter_width = draw.textlength(letter, font=self._font)
-                draw.text((x + letter_width, -1), rest, fill=1, font=self._font)
-            else:
-                draw.text((x, -1), label, fill=1, font=self._font)
-
-        if self._ticker_scrolls:
-            cycle_width = text_width + 8
-            x = -(self._scroll_offset % cycle_width)
-            draw_label(x)
-            draw_label(x + cycle_width)
-        else:
-            x = (self.width - text_width) // 2
-            draw_label(x)
-        # Avoid Pillow's Image.__array_interface__, which goes through
-        # Image.tobytes() and unnecessarily requires the optional ImageFile
-        # module on the minimal Raspberry Pi installation.
-        mask = np.asarray(list(canvas.get_flattened_data()), dtype=np.uint8)
-        mask = mask.reshape(self.ticker_height, self.width) != 0
-        ticker = frame[-self.ticker_height :]
-        ticker[:] = 0
-        ticker[mask] = self.ticker_text_color
-        if letter_canvas is not None:
-            letter_mask = np.asarray(
-                list(letter_canvas.get_flattened_data()), dtype=np.uint8
-            )
-            letter_mask = letter_mask.reshape(self.ticker_height, self.width) != 0
-            ticker[letter_mask] = letter_color

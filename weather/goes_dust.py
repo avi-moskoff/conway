@@ -23,6 +23,26 @@ class GoesDustError(RuntimeError):
     pass
 
 
+class GoesDustConnectionError(GoesDustError):
+    """The request never got a response at all - DNS, timeout, connection
+    refused. Distinct from GoesDustApiError so callers can tell "no
+    internet" apart from "the service is up but unhappy" - see the design
+    doc's Error & degraded-state handling section.
+    """
+
+
+class GoesDustApiError(GoesDustError):
+    """NOAA STAR was reachable but returned an error response (a 404 for a
+    not-yet-published timestamp is handled separately in _try_fetch and
+    never reaches this)."""
+
+
+class GoesDustRateLimitedError(GoesDustApiError):
+    def __init__(self, retry_after_seconds: float | None = None) -> None:
+        super().__init__("NOAA STAR API rate limit reached")
+        self.retry_after_seconds = retry_after_seconds
+
+
 def _decode_jpeg(body: bytes) -> np.ndarray | None:
     """Decodes JPEG bytes to an RGB array. Runs inside an isolated worker
     process (see _decode_via_subprocess) - must stay a plain, picklable,
@@ -175,6 +195,102 @@ def sector_pixel_for(latitude: float, longitude: float) -> tuple[float, float]:
     return x, y
 
 
+# --- Dust RGB -> single legible "dust, yes/no" signal --------------------
+#
+# NOAA's Dust RGB product packs seven-ish categories (dust, several cloud
+# types, desert surface, clear land/ocean) into a color scheme nobody has
+# memorized. Rather than display it raw and undecoded, threshold it down to
+# one binary signal: is this pixel dust or not.
+#
+# The threshold band below is seeded from the product's own recipe and two
+# independent Quick Guides (CIRA/RAMMB and EUMETrain, cross-checked against
+# each other), not from local capture - real dust events near Phoenix are
+# rare (haboobs are a monsoon-season, few-times-a-year event), so there's
+# no way to derive this from Avi's own captures alone. Both guides describe
+# the same continuum: dust reads as purple/plum at low altitude, shading to
+# pink/magenta with height, in both day and night scenes, and very thick
+# plumes go purple regardless of time of day. That maps to a hue band
+# spanning purple through plum, magenta, and pink; a low saturation floor
+# (admits plum's muted, brownish-purple end; excludes washed-out white/gray
+# cloud); and a low value floor (excludes the near-black high, thin ice
+# clouds both guides describe, without cutting off darker nighttime dust).
+#
+# Kept deliberately wide, per the same false-alarm-vs-miss asymmetry that
+# shapes the rest of this screen: a false alarm costs a glance, a missed
+# haboob defeats the point. Still a living constant - refine it the next
+# time a real haboob passes over and can be eyeballed against it, the same
+# way this module's own sector calibration above is treated - not a final
+# answer.
+DUST_HUE_MIN_DEGREES = 255.0
+DUST_HUE_MAX_DEGREES = 355.0
+DUST_SATURATION_MIN = 0.20
+DUST_VALUE_MIN = 0.15
+
+# The one fixed hue every matched "dust" pixel gets remapped to (magenta -
+# distinct from every other color already claimed elsewhere on this
+# display: red is signal-only, amber is AQI, blue/green are rail/landmark
+# categoricals, blue-white is precipitation). Consistent with precip and
+# AQI's single-hue fields: one hue always means the same thing, rather than
+# preserving whatever shade of purple-to-magenta the source pixel happened
+# to be.
+DUST_MATCH_RGB = (255, 0, 255)
+
+# Flat neutral backdrop for everything that isn't dust - clouds, desert
+# surface, clear land/ocean all collapse to this rather than keeping their
+# own raw colors or brightness, since the point is a binary "dust, yes or
+# no" signal, not a legend-free way to still show every other category.
+DUST_BACKDROP_RGB = (0, 0, 0)
+
+
+def _rgb_to_hsv(rgb: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Vectorized RGB (0-255) -> HSV (hue in degrees 0-360, saturation and
+    value in 0-1). Written out by hand (rather than a per-pixel loop, or a
+    dependency this project doesn't otherwise need) since this runs on
+    every dust poll, not just once at boot.
+    """
+    arr = rgb.astype(np.float64) / 255.0
+    r, g, b = arr[..., 0], arr[..., 1], arr[..., 2]
+    maximum = arr.max(axis=-1)
+    minimum = arr.min(axis=-1)
+    chroma = maximum - minimum
+
+    hue = np.zeros_like(maximum)
+    nonzero = chroma > 0
+    r_is_max = nonzero & (maximum == r)
+    g_is_max = nonzero & (maximum == g) & ~r_is_max
+    b_is_max = nonzero & (maximum == b) & ~r_is_max & ~g_is_max
+
+    safe_chroma = np.where(nonzero, chroma, 1.0)
+    hue[r_is_max] = (60 * ((g - b) / safe_chroma) % 360)[r_is_max]
+    hue[g_is_max] = (60 * ((b - r) / safe_chroma) + 120)[g_is_max]
+    hue[b_is_max] = (60 * ((r - g) / safe_chroma) + 240)[b_is_max]
+
+    safe_maximum = np.where(maximum > 0, maximum, 1.0)
+    saturation = np.where(maximum > 0, chroma / safe_maximum, 0.0)
+    value = maximum
+    return hue, saturation, value
+
+
+def apply_dust_filter(rgb: np.ndarray) -> np.ndarray:
+    """Reduce a sampled Dust RGB image to a legible binary dust signal.
+
+    Pixels matching the threshold band above become DUST_MATCH_RGB;
+    everything else becomes DUST_BACKDROP_RGB. See the module-level
+    comment above for where the threshold comes from.
+    """
+    hue, saturation, value = _rgb_to_hsv(rgb)
+    is_dust = (
+        (hue >= DUST_HUE_MIN_DEGREES)
+        & (hue <= DUST_HUE_MAX_DEGREES)
+        & (saturation >= DUST_SATURATION_MIN)
+        & (value >= DUST_VALUE_MIN)
+    )
+    result = np.empty_like(rgb)
+    result[..., :] = DUST_BACKDROP_RGB
+    result[is_dust] = DUST_MATCH_RGB
+    return result
+
+
 class GoesDustClient:
     """Fetches the latest NOAA STAR GOES Dust RGB sector image.
 
@@ -249,11 +365,23 @@ class GoesDustClient:
                 if error.code == 404:
                     logger.info("Dust fetch %s: 404 (not yet published)", timestamp)
                     return None
+                if error.code == 429:
+                    value = error.headers.get("Retry-After")
+                    try:
+                        retry_after = float(value) if value else None
+                    except ValueError:
+                        retry_after = None
+                    logger.warning(
+                        "Dust fetch %s attempt %d/%d: rate limited",
+                        timestamp, attempt + 1, self.retries_per_timestamp,
+                    )
+                    last_network_error = GoesDustRateLimitedError(retry_after)
+                    continue
                 logger.warning(
                     "Dust fetch %s attempt %d/%d: HTTP %d",
                     timestamp, attempt + 1, self.retries_per_timestamp, error.code,
                 )
-                last_network_error = GoesDustError(
+                last_network_error = GoesDustApiError(
                     f"NOAA STAR API returned HTTP {error.code}"
                 )
                 continue
@@ -263,7 +391,9 @@ class GoesDustClient:
                     timestamp, attempt + 1, self.retries_per_timestamp,
                     type(error).__name__, error,
                 )
-                last_network_error = GoesDustError("could not reach NOAA STAR API")
+                last_network_error = GoesDustConnectionError(
+                    "could not reach NOAA STAR API"
+                )
                 continue
             decoded = self._decode(body)
             if decoded is not None:

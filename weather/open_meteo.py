@@ -13,6 +13,25 @@ class OpenMeteoError(RuntimeError):
     pass
 
 
+class OpenMeteoConnectionError(OpenMeteoError):
+    """The request never got a response at all - DNS, timeout, connection
+    refused. Distinct from OpenMeteoApiError so callers can tell "no
+    internet" apart from "the service is up but unhappy" - see the design
+    doc's Error & degraded-state handling section.
+    """
+
+
+class OpenMeteoApiError(OpenMeteoError):
+    """Open-Meteo was reachable but returned an error response or a body
+    that couldn't be parsed."""
+
+
+class OpenMeteoRateLimitedError(OpenMeteoApiError):
+    def __init__(self, retry_after_seconds: float | None = None) -> None:
+        super().__init__("Open-Meteo rate limit reached")
+        self.retry_after_seconds = retry_after_seconds
+
+
 def _default_transport(request: Request, timeout: float) -> bytes:
     with urlopen(request, timeout=timeout) as response:
         return response.read()
@@ -88,13 +107,22 @@ class OpenMeteoClient:
         try:
             body = self._transport(request, self._timeout_seconds)
         except HTTPError as error:
-            raise OpenMeteoError(f"Open-Meteo API returned HTTP {error.code}") from error
+            if error.code == 429:
+                value = error.headers.get("Retry-After")
+                try:
+                    retry_after = float(value) if value else None
+                except ValueError:
+                    retry_after = None
+                raise OpenMeteoRateLimitedError(retry_after) from error
+            raise OpenMeteoApiError(
+                f"Open-Meteo API returned HTTP {error.code}"
+            ) from error
         except (OSError, URLError) as error:
-            raise OpenMeteoError("could not reach Open-Meteo API") from error
+            raise OpenMeteoConnectionError("could not reach Open-Meteo API") from error
         try:
             return json.loads(body)
         except (json.JSONDecodeError, UnicodeDecodeError) as error:
-            raise OpenMeteoError("Open-Meteo API returned malformed JSON") from error
+            raise OpenMeteoApiError("Open-Meteo API returned malformed JSON") from error
 
     @staticmethod
     def _parse_weather(record: object) -> WeatherSample | None:

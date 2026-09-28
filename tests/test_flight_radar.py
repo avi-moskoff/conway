@@ -155,7 +155,7 @@ class FlightRadarGameTests(unittest.TestCase):
         latitude, longitude = offset_to_latlon(7.0, 7.0, 33.0, -112.0)
         synthetic_line = {"A": ((33.0, -112.0), (latitude, longitude))}
         with patch("games.flight_radar.LINE_GEOMETRY", synthetic_line):
-            self.game.reset()  # -> westbound_eta; rail only draws off aircraft mode
+            self.game.cycle_view(1)  # -> westbound_eta; rail only draws off aircraft mode
             with self.game._data_lock:
                 self.game._trains = (Train("1", "A", 0, latitude, longitude),)
                 self.game._train_snapshot_time = monotonic()
@@ -175,8 +175,19 @@ class FlightRadarGameTests(unittest.TestCase):
                 self.game._trains = (Train("1", "A", 0, 33.0, -111.98),)
                 self.game._train_snapshot_time = monotonic()
 
-            frame = self.game.frame
+            frame = self.game.frame.copy()
 
+        # airport_color == rail_line_color (intentional - see the class
+        # comment on airport_color), so blank the airport's own pixel
+        # before checking that no *rail line* got drawn in aircraft mode.
+        radar_height = self.game.height - self.game.ticker_height - 1
+        airport_pixel = project_position(
+            33.05, -112.0, 33.0, -112.0, self.game._config.radius_nm,
+            self.game.width, radar_height,
+        )
+        self.assertIsNotNone(airport_pixel)
+        x, y = airport_pixel
+        frame[y, x] = 0
         self.assertFalse(np.any(np.all(frame == self.game.rail_line_color, axis=2)))
         self.assertFalse(
             np.any(np.all(frame == self.game.eastbound_train_color, axis=2))
@@ -188,10 +199,12 @@ class FlightRadarGameTests(unittest.TestCase):
             self.game._has_error = True
             self.game._snapshot_time = monotonic()
 
-        self.assertEqual(tuple(self.game.frame[0, 0]), self.game.error_color)
+        # The corner is black background before the invert, so an error
+        # flips it to white - see games.base.mark_error.
+        self.assertEqual(tuple(self.game.frame[0, 0]), (255, 255, 255))
 
         # ...but not in a train mode, where it's irrelevant.
-        self.game.reset()  # -> westbound_eta
+        self.game.cycle_view(1)  # -> westbound_eta
         with self.game._data_lock:
             self.game._train_snapshot_time = monotonic()
 
@@ -201,7 +214,7 @@ class FlightRadarGameTests(unittest.TestCase):
         with self.game._data_lock:
             self.game._has_rail_error = True
 
-        self.assertEqual(tuple(self.game.frame[0, 0]), self.game.error_color)
+        self.assertEqual(tuple(self.game.frame[0, 0]), (255, 255, 255))
 
         # ...but not back in aircraft mode (whose own error was never set
         # here - it's still True from the first assertion above, so clear
@@ -209,29 +222,34 @@ class FlightRadarGameTests(unittest.TestCase):
         # shouldn't leak into aircraft mode's flag).
         with self.game._data_lock:
             self.game._has_error = False
-        self.game.reset()
-        self.game.reset()  # -> aircraft
+        self.game.cycle_view(1)
+        self.game.cycle_view(1)  # -> aircraft
         self.assertEqual(tuple(self.game.frame[0, 0]), (0, 0, 0))
 
     def test_train_mode_hides_aircraft_and_airport(self) -> None:
-        # airport_color == home_color, so checking the frame for that color
-        # can't tell the two apart; check the airport's own pixel instead.
+        # Check the airport's own pixel directly rather than scanning for
+        # its color across the whole radar area.
         radar_height = self.game.height - self.game.ticker_height - 1
         airport_pixel = project_position(
             33.05, -112.0, 33.0, -112.0, self.game._config.radius_nm,
             self.game.width, radar_height,
         )
 
-        self.game.reset()  # -> westbound_eta
+        self.game.cycle_view(1)  # -> westbound_eta
         with self.game._data_lock:
             self.game._aircraft = self.client.nearby_aircraft(0, 0, 0)
             self.game._snapshot_time = monotonic()
 
         frame = self.game.frame
-        radar = frame[: -self.game.ticker_height]
+        radar = frame[: -self.game.ticker_height].copy()
 
         # other_aircraft_color == ticker_text_color (both white), so check
         # only the radar area - the ticker legitimately renders white text.
+        # Home is also white here (it inverts a black background - see
+        # games.base.invert_pixel), which isn't an aircraft either, so
+        # blank it out before checking for a stray aircraft color.
+        home_x, home_y = self.game.width // 2, radar_height // 2
+        radar[home_y, home_x] = 0
         self.assertFalse(
             np.any(np.all(radar == self.game.other_aircraft_color, axis=2))
         )
@@ -252,7 +270,7 @@ class FlightRadarGameTests(unittest.TestCase):
 
         self.game.frame
 
-        self.assertEqual(self.game._last_label, "TEST1 PHX>SEA")
+        self.assertEqual(self.game._ticker._last_label, "TEST1 PHX>SEA")
 
     def test_ticker_is_static(self) -> None:
         with self.game._data_lock:
@@ -278,7 +296,7 @@ class FlightRadarGameTests(unittest.TestCase):
 
     def test_ticker_colors_direction_letter_and_keeps_rest_white(self) -> None:
         frame = np.zeros((self.game.height, self.game.width, 3), dtype=np.uint8)
-        self.game._draw_ticker(frame, "W ETA 8M", self.game.westbound_train_color)
+        self.game._ticker.draw(frame, "W ETA 8M", self.game.westbound_train_color)
 
         ticker = frame[-self.game.ticker_height :]
         colors = {tuple(color) for color in ticker.reshape(-1, 3)}
@@ -296,7 +314,7 @@ class FlightRadarGameTests(unittest.TestCase):
 
     def test_ticker_without_letter_color_stays_all_white(self) -> None:
         frame = np.zeros((self.game.height, self.game.width, 3), dtype=np.uint8)
-        self.game._draw_ticker(frame, "CLEAR SKY")
+        self.game._ticker.draw(frame, "CLEAR SKY")
 
         ticker = frame[-self.game.ticker_height :]
         colors = {tuple(color) for color in ticker.reshape(-1, 3)}
@@ -393,7 +411,7 @@ class FlightRadarGameTests(unittest.TestCase):
     def test_renders_rail_line_and_trains(self) -> None:
         synthetic_line = {"A": ((33.0, -112.0), (33.0, -111.95))}
         with patch("games.flight_radar.LINE_GEOMETRY", synthetic_line):
-            self.game.reset()  # -> westbound_eta; rail only draws off aircraft mode
+            self.game.cycle_view(1)  # -> westbound_eta; rail only draws off aircraft mode
             with self.game._data_lock:
                 self.game._trains = (
                     Train("1", "A", 0, 33.0, -111.98),
@@ -416,7 +434,7 @@ class FlightRadarGameTests(unittest.TestCase):
     def test_train_position_snaps_onto_its_line(self) -> None:
         synthetic_line = {"A": ((33.0, -112.0), (33.0, -111.9))}
         with patch("games.flight_radar.LINE_GEOMETRY", synthetic_line):
-            self.game.reset()  # -> westbound_eta; rail only draws off aircraft mode
+            self.game.cycle_view(1)  # -> westbound_eta; rail only draws off aircraft mode
             with self.game._data_lock:
                 # 1.2nm north of the (perfectly flat) line.
                 self.game._trains = (Train("1", "A", 0, 33.02, -111.95),)
@@ -435,7 +453,7 @@ class FlightRadarGameTests(unittest.TestCase):
     def test_draw_trains_extrapolates_by_fix_age_not_just_poll_elapsed(self) -> None:
         synthetic_line = {"A": ((33.0, -112.0), (33.0, -111.9))}
         with patch("games.flight_radar.LINE_GEOMETRY", synthetic_line):
-            self.game.reset()  # -> westbound_eta; rail only draws off aircraft mode
+            self.game.cycle_view(1)  # -> westbound_eta; rail only draws off aircraft mode
             with self.game._data_lock:
                 # Fix was already 5s old when we polled it; snapshot_time is
                 # "now" so elapsed-since-poll is ~0. If extrapolation only
@@ -511,7 +529,7 @@ class FlightRadarGameTests(unittest.TestCase):
         self.assertEqual(velocities, {})
 
     def test_stale_train_snapshot_hides_trains(self) -> None:
-        self.game.reset()  # -> westbound_eta; rail only draws off aircraft mode
+        self.game.cycle_view(1)  # -> westbound_eta; rail only draws off aircraft mode
         with self.game._data_lock:
             self.game._trains = (Train("1", "A", 0, 33.0, -111.98),)
             self.game._train_snapshot_time = (
@@ -524,21 +542,71 @@ class FlightRadarGameTests(unittest.TestCase):
             np.any(np.all(frame == self.game.eastbound_train_color, axis=2))
         )
 
-    def test_reset_cycles_display_mode_and_wraps(self) -> None:
+    def test_cycle_view_steps_display_mode_and_wraps(self) -> None:
+        # Mode switching moved from reset() to cycle_view() - the encoder's
+        # job now, not the button's - see games.base.Game.cycle_view.
         self.assertEqual(self.game.display_modes[self.game._display_mode_index], "aircraft")
 
-        self.game.reset()
+        self.game.cycle_view(1)
         self.assertEqual(
             self.game.display_modes[self.game._display_mode_index], "westbound_eta"
         )
 
-        self.game.reset()
+        self.game.cycle_view(1)
         self.assertEqual(
             self.game.display_modes[self.game._display_mode_index], "eastbound_eta"
         )
 
-        self.game.reset()
+        self.game.cycle_view(1)
         self.assertEqual(self.game.display_modes[self.game._display_mode_index], "aircraft")
+
+    def test_cycle_view_steps_backward(self) -> None:
+        self.game.cycle_view(-1)
+        self.assertEqual(
+            self.game.display_modes[self.game._display_mode_index], "eastbound_eta"
+        )
+
+    def test_cycle_view_wakes_only_the_poller_for_the_mode_switched_into(self) -> None:
+        self.game._wake_event.clear()
+        self.game._rail_wake_event.clear()
+
+        self.game.cycle_view(1)  # aircraft -> westbound_eta
+        self.assertFalse(self.game._wake_event.is_set())
+        self.assertTrue(self.game._rail_wake_event.is_set())
+
+        self.game._rail_wake_event.clear()
+        self.game.cycle_view(1)  # westbound_eta -> eastbound_eta
+        self.assertFalse(self.game._wake_event.is_set())
+        self.assertTrue(self.game._rail_wake_event.is_set())
+
+        self.game._rail_wake_event.clear()
+        self.game.cycle_view(1)  # eastbound_eta -> aircraft
+        self.assertTrue(self.game._wake_event.is_set())
+        self.assertFalse(self.game._rail_wake_event.is_set())
+
+    def test_reset_wakes_the_active_modes_poller_without_changing_the_mode(
+        self,
+    ) -> None:
+        # reset() is a pure force-refresh now - the button's one job
+        # everywhere (see games.base.Game / runner.on_button_pressed). This
+        # also fixes a latent gap in the old combined reset(): it only ever
+        # woke the aircraft poller, even while a rail ETA mode was active.
+        self.game.cycle_view(1)  # -> westbound_eta
+        self.game._wake_event.clear()
+        self.game._rail_wake_event.clear()
+
+        self.game.reset()
+
+        self.assertEqual(
+            self.game.display_modes[self.game._display_mode_index], "westbound_eta"
+        )
+        self.assertFalse(self.game._wake_event.is_set())
+        self.assertTrue(self.game._rail_wake_event.is_set())
+
+    def test_reset_resets_the_ticker_scroll(self) -> None:
+        self.game._ticker._scroll_offset = 7
+        self.game.reset()
+        self.assertEqual(self.game._ticker._scroll_offset, 0)
 
     def test_next_arrival_picks_soonest_upcoming(self) -> None:
         stop_id = self.game._westbound_home_stop_id
@@ -575,22 +643,52 @@ class FlightRadarGameTests(unittest.TestCase):
             "W ETA 3M",
         )
 
-    def test_train_eta_label_fits_without_scrolling(self) -> None:
+    def test_train_eta_label_width_matches_unscii_8s_fixed_char_width(self) -> None:
+        # unscii-8 is monospace at 8px/char, so whether a label fits the
+        # 64px display statically or has to scroll (see games.ticker.Ticker)
+        # now depends purely on character count, unlike the old proportional
+        # default font this replaced. "--" and single-digit-minute etas are
+        # 8 chars (fit exactly); "<1M" and double-digit-minute etas are 9
+        # (scroll).
         canvas = Image.new("1", (self.game.width, self.game.ticker_height), 0)
         draw = ImageDraw.Draw(canvas)
         now = time()
+        char_width_px = 8
 
-        for label in (
-            self.game._train_eta_label(None, "W"),
-            self.game._train_eta_label(StopArrival("1", "A", 1, "9036", now + 30), "W"),
-            self.game._train_eta_label(StopArrival("1", "A", 1, "9036", now + 18 * 60), "W"),
-            self.game._train_eta_label(StopArrival("1", "A", 0, "9008", now + 18 * 60), "E"),
-        ):
-            width = draw.textlength(label, font=self.game._font)
-            self.assertLessEqual(width, self.game.width, label)
+        cases = (
+            (self.game._train_eta_label(None, "W"), False),
+            (
+                self.game._train_eta_label(
+                    StopArrival("1", "A", 1, "9036", now + 30), "W"
+                ),
+                True,
+            ),
+            (
+                self.game._train_eta_label(
+                    StopArrival("1", "A", 1, "9036", now + 185), "W"
+                ),
+                False,
+            ),
+            (
+                self.game._train_eta_label(
+                    StopArrival("1", "A", 1, "9036", now + 18 * 60), "W"
+                ),
+                True,
+            ),
+            (
+                self.game._train_eta_label(
+                    StopArrival("1", "A", 0, "9008", now + 18 * 60), "E"
+                ),
+                True,
+            ),
+        )
+        for label, expected_to_scroll in cases:
+            width = draw.textlength(label, font=self.game._ticker._font)
+            self.assertEqual(width, len(label) * char_width_px, label)
+            self.assertEqual(width > self.game.width, expected_to_scroll, label)
 
     def test_frame_highlights_selected_train_and_shows_eta_ticker(self) -> None:
-        self.game.reset()  # -> westbound_eta
+        self.game.cycle_view(1)  # -> westbound_eta
         stop_id = self.game._westbound_home_stop_id
         with self.game._data_lock:
             self.game._trains = (
@@ -610,10 +708,10 @@ class FlightRadarGameTests(unittest.TestCase):
         self.assertFalse(
             np.any(np.all(radar == self.game.westbound_train_color, axis=2))
         )
-        self.assertIn("ETA", self.game._last_label)
+        self.assertIn("ETA", self.game._ticker._last_label)
 
     def test_frame_shows_eta_ticker_even_without_a_matched_vehicle(self) -> None:
-        self.game.reset()  # -> westbound_eta
+        self.game.cycle_view(1)  # -> westbound_eta
         stop_id = self.game._westbound_home_stop_id
         with self.game._data_lock:
             self.game._train_snapshot_time = monotonic()
@@ -623,7 +721,7 @@ class FlightRadarGameTests(unittest.TestCase):
 
         self.game.frame
 
-        self.assertEqual(self.game._last_label, "W ETA 5M")
+        self.assertEqual(self.game._ticker._last_label, "W ETA 5M")
 
     def test_rail_polling_pauses_and_restarts_with_lifecycle(self) -> None:
         self.game.activate()

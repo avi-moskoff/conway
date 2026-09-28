@@ -7,6 +7,7 @@ class BoidsGame(Game):
     """A flocking simulation sized for the LED matrix."""
 
     frame_delay_seconds = 0.05
+    menu_label = "BOIDS"
     perception_radius = 9
     separation_radius = 4
     alignment_weight = 0.04

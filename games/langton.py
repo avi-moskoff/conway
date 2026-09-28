@@ -24,6 +24,7 @@ class Langton(Game):
     """Owns and evolves a Langton's Ant board."""
 
     frame_delay_seconds = 0.05
+    menu_label = "ANT"
     _PALETTE = np.array([[0, 0, 0], [255, 255, 255]], dtype=np.uint8)
 
     def __init__(self, height: int, width: int) -> None:

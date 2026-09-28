@@ -8,9 +8,15 @@ import numpy as np
 from PIL import Image
 
 from weather.goes_dust import (
+    DUST_BACKDROP_RGB,
+    DUST_MATCH_RGB,
+    GoesDustApiError,
     GoesDustClient,
+    GoesDustConnectionError,
     GoesDustError,
+    GoesDustRateLimitedError,
     _decode_via_subprocess,
+    apply_dust_filter,
     sector_pixel_for,
 )
 
@@ -164,6 +170,49 @@ class GoesDustClientTests(unittest.TestCase):
             client.latest_frame(now=now)
         self.assertEqual(len(calls), client.retries_per_timestamp)
 
+    def test_non_404_http_error_is_specifically_an_api_error(self) -> None:
+        # Distinguishing connection/API/rate-limit failures is what lets
+        # WeatherRadarGame show a specific ticker reason instead of a bare
+        # "NO SIGNAL" - see the design doc's Error & degraded-state
+        # handling section.
+        def transport(request: Request, _timeout: float) -> bytes:
+            raise HTTPError(request.full_url, 500, "server error", {}, None)
+
+        client = GoesDustClient(
+            transport=transport, decode=_fake_decode, retry_delay_seconds=0
+        )
+        now = datetime(2026, 8, 24, 3, 53, 16, tzinfo=timezone.utc)
+
+        with self.assertRaises(GoesDustApiError):
+            client.latest_frame(now=now)
+
+    def test_429_raises_rate_limited_error_with_retry_after(self) -> None:
+        def transport(request: Request, _timeout: float) -> bytes:
+            raise HTTPError(
+                request.full_url, 429, "too many requests", {"Retry-After": "45"}, None
+            )
+
+        client = GoesDustClient(
+            transport=transport, decode=_fake_decode, retry_delay_seconds=0
+        )
+        now = datetime(2026, 8, 24, 3, 53, 16, tzinfo=timezone.utc)
+
+        with self.assertRaises(GoesDustRateLimitedError) as context:
+            client.latest_frame(now=now)
+        self.assertEqual(context.exception.retry_after_seconds, 45.0)
+
+    def test_connection_failure_raises_connection_error(self) -> None:
+        def transport(_request: Request, _timeout: float) -> bytes:
+            raise OSError("network unreachable")
+
+        client = GoesDustClient(
+            transport=transport, decode=_fake_decode, retry_delay_seconds=0
+        )
+        now = datetime(2026, 8, 24, 3, 53, 16, tzinfo=timezone.utc)
+
+        with self.assertRaises(GoesDustConnectionError):
+            client.latest_frame(now=now)
+
 
 class DecodeViaSubprocessTests(unittest.TestCase):
     # Exercises the real default decode path (an actual worker subprocess),
@@ -202,3 +251,50 @@ class SectorPixelForTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ApplyDustFilterTests(unittest.TestCase):
+    def test_bright_magenta_dust_signature_is_matched(self) -> None:
+        # Pure magenta: hue 300, saturation 1, value 1 - squarely inside
+        # the dust band described by the CIRA/RAMMB and EUMETrain guides.
+        pixel = np.array([[[255, 0, 255]]], dtype=np.uint8)
+        result = apply_dust_filter(pixel)
+        self.assertEqual(tuple(result[0, 0]), DUST_MATCH_RGB)
+
+    def test_muted_plum_dust_signature_is_matched(self) -> None:
+        # hue ~285, saturation ~0.57, value ~0.55 - the guides' "low-level
+        # dust plumes have a purple/plum color" description, deliberately
+        # less saturated/bright than pure magenta.
+        pixel = np.array([[[120, 60, 140]]], dtype=np.uint8)
+        result = apply_dust_filter(pixel)
+        self.assertEqual(tuple(result[0, 0]), DUST_MATCH_RGB)
+
+    def test_cloud_green_is_not_matched(self) -> None:
+        # Mid-level thin cloud, per the guides, reads as green - nowhere
+        # near the purple/plum-to-pink/magenta dust band.
+        pixel = np.array([[[0, 255, 0]]], dtype=np.uint8)
+        result = apply_dust_filter(pixel)
+        self.assertEqual(tuple(result[0, 0]), DUST_BACKDROP_RGB)
+
+    def test_desert_surface_light_blue_is_not_matched(self) -> None:
+        pixel = np.array([[[100, 180, 255]]], dtype=np.uint8)
+        result = apply_dust_filter(pixel)
+        self.assertEqual(tuple(result[0, 0]), DUST_BACKDROP_RGB)
+
+    def test_washed_out_gray_cloud_is_excluded_by_the_saturation_floor(self) -> None:
+        # Hue could fall inside the dust band by chance even for a
+        # near-gray pixel; low saturation should rule it out regardless.
+        pixel = np.array([[[210, 200, 215]]], dtype=np.uint8)
+        result = apply_dust_filter(pixel)
+        self.assertEqual(tuple(result[0, 0]), DUST_BACKDROP_RGB)
+
+    def test_near_black_high_cloud_is_excluded_by_the_value_floor(self) -> None:
+        pixel = np.array([[[10, 2, 12]]], dtype=np.uint8)
+        result = apply_dust_filter(pixel)
+        self.assertEqual(tuple(result[0, 0]), DUST_BACKDROP_RGB)
+
+    def test_handles_a_full_size_grid_without_error(self) -> None:
+        grid = np.random.default_rng(0).integers(0, 256, (51, 64, 3), dtype=np.uint8)
+        result = apply_dust_filter(grid)
+        self.assertEqual(result.shape, grid.shape)
+        self.assertEqual(result.dtype, grid.dtype)
