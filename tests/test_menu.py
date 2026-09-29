@@ -26,6 +26,16 @@ class MenuPaddingTests(unittest.TestCase):
         text = frame[:ROW_HEIGHT] == 0
         self.assertFalse(text[:, -TEXT_PADDING:].any())
 
+    def test_a_label_with_a_space_sits_on_the_same_rows_as_one_without(self) -> None:
+        with_space = ScreenMenu(64, 64)
+        with_space.open(("AB CD",), 0)
+        without = ScreenMenu(64, 64)
+        without.open(("ABCD",), 0)
+        rows = lambda m: tuple(  # noqa: E731
+            (m.frame[:ROW_HEIGHT, :, 0] == 0).any(axis=1).nonzero()[0][[0, -1]]
+        )
+        self.assertEqual(rows(with_space), rows(without))
+
 
 if __name__ == "__main__":
     unittest.main()

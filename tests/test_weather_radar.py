@@ -47,6 +47,7 @@ class FakeOpenMeteoClient:
                 temperature_f=80.0,
                 precipitation_mm=0.0,
                 weather_code=0,
+                cloud_cover_percent=0.0,
             )
             for lat, lon in points
         )
@@ -247,9 +248,9 @@ class WeatherRadarGameTests(unittest.TestCase):
         self.assertEqual(self.game._aqi_category(301), "HAZARDOUS")
 
     def test_conditions_label_maps_weather_codes(self) -> None:
-        clear = WeatherSample(33.0, -112.0, 75.0, 0.0, weather_code=0)
-        rain = WeatherSample(33.0, -112.0, 60.0, 2.0, weather_code=63)
-        storm = WeatherSample(33.0, -112.0, 68.0, 5.0, weather_code=95)
+        clear = WeatherSample(33.0, -112.0, 75.0, 0.0, weather_code=0, cloud_cover_percent=0.0)
+        rain = WeatherSample(33.0, -112.0, 60.0, 2.0, weather_code=63, cloud_cover_percent=0.0)
+        storm = WeatherSample(33.0, -112.0, 68.0, 5.0, weather_code=95, cloud_cover_percent=0.0)
         self.assertEqual(self.game._conditions_label(clear), "75F CLEAR")
         self.assertEqual(self.game._conditions_label(rain), "60F RAIN")
         self.assertEqual(self.game._conditions_label(storm), "68F STORM")
@@ -266,13 +267,36 @@ class WeatherRadarGameTests(unittest.TestCase):
         self.assertEqual(tuple(int(v) for v in colors[1]), (128, 96, 0))
         self.assertEqual(tuple(int(v) for v in colors[2]), (255, 255, 255))
 
-    def test_colorize_field_matches_precipitation_ramp_colors(self) -> None:
-        field = np.array([0.0, self.game.precipitation_cap_mm])
-        colors = self.game._colorize_field(
-            field, self.game.precipitation_stops_t, self.game.precipitation_stops_rgb
-        )
+    def test_conditions_are_black_when_clear_and_dry(self) -> None:
+        colors = self.game._compose_conditions(np.array([0.0]), np.array([0.0]))
         self.assertEqual(tuple(int(v) for v in colors[0]), (0, 0, 0))
-        self.assertEqual(tuple(int(v) for v in colors[1]), (255, 255, 255))
+
+    def test_overcast_dry_sky_is_gray_with_no_blue_tint(self) -> None:
+        colors = self.game._compose_conditions(np.array([100.0]), np.array([0.0]))
+        self.assertEqual(
+            tuple(int(v) for v in colors[0]), self.game.cloud_white
+        )
+
+    def test_heavy_rain_reaches_full_blue_whatever_the_cloud(self) -> None:
+        cap = self.game.precipitation_cap_mm
+        colors = self.game._compose_conditions(
+            np.array([0.0, 100.0]), np.array([cap, cap])
+        )
+        for color in colors:
+            self.assertEqual(
+                tuple(int(v) for v in color), self.game.precipitation_blue
+            )
+
+    def test_light_rain_is_clearly_blue_not_near_black(self) -> None:
+        colors = self.game._compose_conditions(np.array([0.0]), np.array([0.5]))
+        self.assertGreaterEqual(int(colors[0][2]), 80)
+
+    def test_rain_pushes_a_cloudy_pixel_from_gray_toward_blue(self) -> None:
+        dry, wet = self.game._compose_conditions(
+            np.array([100.0, 100.0]), np.array([0.0, 1.0])
+        )
+        self.assertLess(int(wet[0]), int(dry[0]))  # red drains away
+        self.assertGreater(int(wet[2]), int(dry[2]))  # blue rises
 
     def test_error_shows_specific_reason_while_data_is_still_fresh(self) -> None:
         # A poll failure shouldn't blank out perfectly good cached data - it

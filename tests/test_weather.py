@@ -23,6 +23,7 @@ class OpenMeteoClientWeatherTests(unittest.TestCase):
                     "temperature_2m": 101.2,
                     "precipitation": 0.0,
                     "weather_code": 0,
+                    "cloud_cover": 20,
                 },
             },
             {
@@ -32,6 +33,7 @@ class OpenMeteoClientWeatherTests(unittest.TestCase):
                     "temperature_2m": 98.5,
                     "precipitation": 1.2,
                     "weather_code": 61,
+                    "cloud_cover": 90,
                 },
             },
         ]
@@ -44,6 +46,8 @@ class OpenMeteoClientWeatherTests(unittest.TestCase):
         self.assertEqual(len(samples), 2)
         self.assertEqual(samples[0].temperature_f, 101.2)
         self.assertEqual(samples[1].weather_code, 61)
+        self.assertEqual(samples[0].cloud_cover_percent, 20.0)
+        self.assertEqual(samples[1].cloud_cover_percent, 90.0)
 
     def test_single_point_response_is_not_wrapped_in_a_list(self) -> None:
         response = {
@@ -53,6 +57,7 @@ class OpenMeteoClientWeatherTests(unittest.TestCase):
                 "temperature_2m": 101.2,
                 "precipitation": 0.0,
                 "weather_code": 0,
+                "cloud_cover": 50,
             },
         }
         client = OpenMeteoClient(
@@ -81,6 +86,7 @@ class OpenMeteoClientWeatherTests(unittest.TestCase):
                     "temperature_2m": 98.5,
                     "precipitation": 1.2,
                     "weather_code": 61,
+                    "cloud_cover": 50,
                 },
             },
         ]

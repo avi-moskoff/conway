@@ -9,7 +9,7 @@ nearly verbatim, between flight_radar.py and weather_radar.py).
 import numpy as np
 from PIL import Image, ImageDraw
 
-from games.fonts import ticker_font
+from games.fonts import draw_text, ticker_font
 
 
 class Ticker:
@@ -68,11 +68,11 @@ class Ticker:
         def draw_label(x: float) -> None:
             if letter_draw is not None:
                 letter, rest = label[0], label[1:]
-                letter_draw.text((x, -1), letter, fill=1, font=self._font)
+                draw_text(letter_draw, (x, 0), letter, self._font)
                 letter_width = draw.textlength(letter, font=self._font)
-                draw.text((x + letter_width, -1), rest, fill=1, font=self._font)
+                draw_text(draw, (x + letter_width, 0), rest, self._font)
             else:
-                draw.text((x, -1), label, fill=1, font=self._font)
+                draw_text(draw, (x, 0), label, self._font)
 
         if self.scrolls:
             cycle_width = text_width + 8

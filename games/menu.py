@@ -9,7 +9,7 @@ of its own beyond which row is currently highlighted.
 import numpy as np
 from PIL import Image, ImageDraw
 
-from games.fonts import ticker_font
+from games.fonts import draw_text, ticker_font
 
 # unscii-8's capital letters are 7px tall (labels are all caps; the 8th
 # row of its cell is only for descenders). Each row adds 1px of padding
@@ -62,9 +62,9 @@ class ScreenMenu:
             y = index * ROW_HEIGHT
             if y >= self.height:
                 break
-            # Pillow places unscii-8's capitals starting at exactly the y it's
-            # given, so offset by the padding.
-            draw.text((TEXT_PADDING, y + TEXT_PADDING), label, fill=1, font=self._font)
+            # draw_text places every glyph's capitals starting at exactly the
+            # y it's given, so offset by the padding.
+            draw_text(draw, (TEXT_PADDING, y + TEXT_PADDING), label, self._font)
 
         # Same Pillow-tobytes-avoidance workaround as Ticker.draw.
         mask = np.asarray(list(canvas.get_flattened_data()), dtype=np.uint8)

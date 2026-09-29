@@ -67,7 +67,7 @@ class OpenMeteoClient:
             self._weather_url,
             points,
             {
-                "current": "temperature_2m,precipitation,weather_code",
+                "current": "temperature_2m,precipitation,weather_code,cloud_cover",
                 "temperature_unit": "fahrenheit",
             },
         )
@@ -138,6 +138,7 @@ class OpenMeteoClient:
                 temperature_f=float(current["temperature_2m"]),
                 precipitation_mm=float(current["precipitation"]),
                 weather_code=int(current["weather_code"]),
+                cloud_cover_percent=float(current["cloud_cover"]),
             )
         except (KeyError, TypeError, ValueError):
             return None

@@ -76,9 +76,17 @@ class WeatherRadarGame(Game):
 
     ticker_text_color = (255, 255, 255)
 
+    # Conditions view: cloud cover is the base field, black (clear) up to a
+    # deliberately not-quite-full white (overcast) - a whole panel of pure
+    # white would be a wall of light and swamp the white ticker text below
+    # it. Precipitation then pushes each pixel from that gray toward blue.
+    # The push follows the square root of the rainfall, so light rain and
+    # drizzle (a few tenths of a mm) show clearly instead of sitting near
+    # black on a linear ramp; the cap is where it reaches full blue.
+    cloud_cover_max_percent = 100.0
+    cloud_white = (150, 150, 150)
     precipitation_cap_mm = 4.0
-    precipitation_stops_t = (0.0, precipitation_cap_mm / 2, precipitation_cap_mm)
-    precipitation_stops_rgb = ((0, 0, 0), (0, 80, 255), (255, 255, 255))
+    precipitation_blue = (0, 80, 255)
 
     # EPA US AQI category breakpoints, kept as gradient anchors so the
     # field still shades smoothly at the same real-world thresholds - only
@@ -509,12 +517,17 @@ class WeatherRadarGame(Game):
 
     def _store_conditions(self, samples: tuple[WeatherSample, ...]) -> None:
         easts, norths = self._offsets_for_samples(samples)
-        values = np.array([sample.precipitation_mm for sample in samples])
-        field = self._colorize_field(
-            self._idw(easts, norths, values),
-            self.precipitation_stops_t,
-            self.precipitation_stops_rgb,
+        cloud = self._idw(
+            easts,
+            norths,
+            np.array([sample.cloud_cover_percent for sample in samples]),
         )
+        precipitation = self._idw(
+            easts,
+            norths,
+            np.array([sample.precipitation_mm for sample in samples]),
+        )
+        field = self._compose_conditions(cloud, precipitation)
         closest = samples[int(np.argmin(easts * easts + norths * norths))]
         with self._data_lock:
             self._conditions_field = field
@@ -556,6 +569,19 @@ class WeatherRadarGame(Game):
         distance_sq = diff_east * diff_east + diff_north * diff_north
         weights = 1.0 / (distance_sq + 1e-6)
         return np.sum(weights * values, axis=-1) / np.sum(weights, axis=-1)
+
+    @classmethod
+    def _compose_conditions(
+        cls, cloud_percent: np.ndarray, precipitation_mm: np.ndarray
+    ) -> np.ndarray:
+        """Cloud cover as a black-to-white base, blended toward blue by
+        precipitation (see the class constants for the reasoning)."""
+        cloud = np.clip(cloud_percent / cls.cloud_cover_max_percent, 0.0, 1.0)
+        base = cloud[..., np.newaxis] * np.array(cls.cloud_white, dtype=float)
+        rain = np.sqrt(np.clip(precipitation_mm / cls.precipitation_cap_mm, 0.0, 1.0))
+        blend = rain[..., np.newaxis]
+        blue = np.array(cls.precipitation_blue, dtype=float)
+        return (base * (1.0 - blend) + blue * blend).astype(np.uint8)
 
     @staticmethod
     def _colorize_field(

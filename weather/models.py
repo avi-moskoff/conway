@@ -8,6 +8,7 @@ class WeatherSample:
     temperature_f: float
     precipitation_mm: float
     weather_code: int
+    cloud_cover_percent: float
 
 
 @dataclass(frozen=True, slots=True)

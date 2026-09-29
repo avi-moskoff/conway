@@ -15,7 +15,7 @@ rendered at its native size - any other size would blur or misalign it.
 
 from pathlib import Path
 
-from PIL import ImageFont
+from PIL import ImageDraw, ImageFont
 
 _ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets" / "fonts"
 
@@ -54,3 +54,29 @@ def preload_fonts() -> None:
     """
     ticker_font()
     boot_font()
+
+
+def draw_text(
+    draw: ImageDraw.ImageDraw,
+    xy: tuple[float, float],
+    text: str,
+    font: ImageFont.FreeTypeFont,
+    fill: int = 1,
+) -> None:
+    """Draw `text` one glyph at a time, so every glyph lands on the same
+    rows whatever string it's in.
+
+    Drawing a whole string in one call isn't safe for these bitmap fonts:
+    with the installed Pillow, a string containing a space is placed one
+    pixel lower than the same letters without one (e.g. "W E" sits a row
+    below "WE"). That made a flight-radar direction letter, drawn on its
+    own, sit a row higher than the " ETA 5M" beside it. Placing each glyph
+    individually (Unscii is monospace, so the advance is just each
+    glyph's own width) removes the dependence on what else is in the
+    string. Spaces just advance.
+    """
+    x, y = xy
+    for glyph in text:
+        if glyph != " ":
+            draw.text((x, y), glyph, fill=fill, font=font)
+        x += draw.textlength(glyph, font=font)

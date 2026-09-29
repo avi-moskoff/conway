@@ -177,9 +177,8 @@ class FlightRadarGameTests(unittest.TestCase):
 
             frame = self.game.frame.copy()
 
-        # airport_color == rail_line_color (intentional - see the class
-        # comment on airport_color), so blank the airport's own pixel
-        # before checking that no *rail line* got drawn in aircraft mode.
+        # Blank the airport's own pixel before checking that no *rail
+        # line* got drawn in aircraft mode.
         radar_height = self.game.height - self.game.ticker_height - 1
         airport_pixel = project_position(
             33.05, -112.0, 33.0, -112.0, self.game._config.radius_nm,
@@ -542,6 +541,25 @@ class FlightRadarGameTests(unittest.TestCase):
             np.any(np.all(frame == self.game.eastbound_train_color, axis=2))
         )
 
+    def test_rail_views_mark_home_with_a_fixed_red_pixel_even_on_the_line(
+        self,
+    ) -> None:
+        synthetic_line = {"A": ((33.0, -112.0), (33.0, -111.95))}  # through home
+        with patch("games.flight_radar.LINE_GEOMETRY", synthetic_line):
+            self.game.cycle_view(1)  # -> westbound_eta
+            frame = self.game.frame
+        radar_height = self.game.height - self.game.ticker_height - 1
+        center = (radar_height // 2, self.game.width // 2)
+        self.assertEqual(
+            tuple(int(v) for v in frame[center]), self.game.rail_home_color
+        )
+
+    def test_next_train_is_not_red_on_the_rail_views(self) -> None:
+        # Red means home there, so the two can't share it.
+        self.assertNotEqual(
+            self.game.featured_train_color, self.game.rail_home_color
+        )
+
     def test_cycle_view_steps_display_mode_and_wraps(self) -> None:
         # Mode switching moved from reset() to cycle_view() - the encoder's
         # job now, not the button's - see games.base.Game.cycle_view.
@@ -703,7 +721,7 @@ class FlightRadarGameTests(unittest.TestCase):
         radar = frame[: -self.game.ticker_height]
 
         self.assertTrue(
-            np.any(np.all(frame == self.game.featured_aircraft_color, axis=2))
+            np.any(np.all(radar == self.game.featured_train_color, axis=2))
         )
         self.assertFalse(
             np.any(np.all(radar == self.game.westbound_train_color, axis=2))

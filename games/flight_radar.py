@@ -55,16 +55,20 @@ class FlightRadarGame(Game):
     # underneath instead of a fixed color - see games.base.invert_pixel
     # / mark_error.
     featured_aircraft_color = (255, 0, 0)
-    # Matches rail_line_color: both are fixed infrastructure landmarks,
-    # and aircraft/rail modes are never drawn together (see the class
-    # comment above), so this is the same intentional per-mode reuse as
-    # eastbound/westbound train colors would be if aircraft mode used
-    # them - a single-channel primary, safe for an isolated pixel, that
-    # means one specific thing within whichever mode is on screen.
+    # On the rail views red belongs to home instead (a fixed pixel, not an
+    # inversion - see rail_home_color), so the next-arriving train being
+    # watched is white there.
+    featured_train_color = (255, 255, 255)
+    rail_home_color = (255, 0, 0)
+    # A single-channel primary, safe for an isolated pixel, that means one
+    # specific thing within whichever mode is on screen.
     airport_color = (0, 0, 255)
     other_aircraft_color = (255, 255, 255)
     eastbound_train_color = (0, 255, 0)
     westbound_train_color = (255, 230, 0)
+    # Full blue is fine now that home is a fixed red pixel on the rail
+    # views rather than an inversion: inverting blue gave yellow, which
+    # looked like a train.
     rail_line_color = (0, 0, 255)
     ticker_text_color = (255, 255, 255)
 
@@ -226,7 +230,7 @@ class FlightRadarGame(Game):
             invert_pixel(frame, center_x, center_y)
         else:
             self._draw_rail_lines(frame, radar_height)
-            invert_pixel(frame, center_x, center_y)
+            frame[center_y, center_x] = self.rail_home_color
             self._draw_trains(
                 frame,
                 radar_height,
@@ -418,7 +422,7 @@ class FlightRadarGame(Game):
                 east, north = nearest_point_on_polyline(east, north, offsets)
             x, y = project_offset(east, north, radius_nm, self.width, radar_height)
             if train.vehicle_id == highlighted_vehicle_id:
-                frame[y, x] = self.featured_aircraft_color
+                frame[y, x] = self.featured_train_color
             else:
                 frame[y, x] = (
                     self.eastbound_train_color
