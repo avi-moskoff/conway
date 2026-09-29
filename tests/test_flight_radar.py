@@ -128,7 +128,7 @@ class FlightRadarGameTests(unittest.TestCase):
         )
 
     def test_long_axis_shows_aircraft_beyond_the_old_uniform_radius(self) -> None:
-        # width=64 > radar_height=51, so east/west is the long axis: 9nm
+        # width=64 > radar_height=55, so east/west is the long axis: 9nm
         # due east is past radius_nm=8 (excluded under the old scaling,
         # which capped every axis at radius_nm) but within reach now that
         # the long axis extends proportionally farther at the same

@@ -69,7 +69,9 @@ class WeatherRadarGame(Game):
     # than a slower delay that would make long labels crawl.
     frame_delay_seconds = 0.1
     menu_label = "WEATHER"
-    ticker_height = 12
+    # 7px capitals plus 1px of margin below them, so the text sits at the
+    # bottom of the panel and everything above it is the visualization.
+    ticker_height = 8
     stale_snapshot_seconds = 1800.0
     display_modes = ("conditions", "aqi", "dust")
     grid_size = 5

@@ -37,7 +37,9 @@ class FlightRadarGame(Game):
 
     frame_delay_seconds = 0.1
     menu_label = "FLIGHT"
-    ticker_height = 12
+    # 7px capitals plus 1px of margin below them, so the text sits at the
+    # bottom of the panel and everything above it is the visualization.
+    ticker_height = 8
     maximum_position_age_seconds = 60.0
     rail_maximum_position_age_seconds = 90.0
     rail_extrapolation_cap_seconds = 20.0

@@ -44,7 +44,7 @@ animations.
 ### Live views
 
 The live screens are north-up maps centered on your home location, drawn above
-a 12-pixel text ticker. Short labels stay centered and longer ones scroll. A
+an 8-pixel text ticker. Short labels stay centered and longer ones scroll. A
 single red pixel in the top-left corner means the latest poll of the current
 view's data source failed, so what you see may be out of date. A live screen
 polls its data source only while it is selected.

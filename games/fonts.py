@@ -75,8 +75,28 @@ def draw_text(
     glyph's own width) removes the dependence on what else is in the
     string. Spaces just advance.
     """
+    if not text:
+        return
+    advance = glyph_advance(draw, font)
     x, y = xy
     for glyph in text:
         if glyph != " ":
             draw.text((x, y), glyph, fill=fill, font=font)
-        x += draw.textlength(glyph, font=font)
+        x += advance
+
+
+def glyph_advance(draw: ImageDraw.ImageDraw, font: ImageFont.FreeTypeFont) -> float:
+    """The one advance every character in a monospace font moves by,
+    measured from a real glyph ("M") - never from a space. A space's
+    measured width isn't trustworthy here: on the Pi it came back much
+    wider than a letter, which spread words far apart. Since the font is
+    monospace, a space simply advances by the same amount as any other
+    character.
+    """
+    return draw.textlength("M", font=font)
+
+
+def text_width(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont) -> float:
+    """Width of `text` as draw_text will lay it out: characters times the
+    single monospace advance."""
+    return len(text) * glyph_advance(draw, font)
