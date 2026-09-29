@@ -11,7 +11,8 @@ from games.conway import GameOfLife, boot_seed_board, boot_seed_frame
 
 
 class FakeDevice:
-    def __init__(self, *_args, **_kwargs) -> None:
+    def __init__(self, *args, **_kwargs) -> None:
+        self.args = args
         self.is_on = False
         self.is_blinking = False
 
@@ -165,12 +166,20 @@ class ButtonAndEncoderRoutingTests(unittest.TestCase):
             runner.on_button_pressed()
             self.assertEqual(game.reset_calls, 1)
 
-    def test_button_does_nothing_while_the_menu_is_open(self) -> None:
-        game = RecordingGame("ONE")
-        with patched_runner([game]) as runner:
+    def test_button_selects_the_highlighted_screen_while_the_menu_is_open(
+        self,
+    ) -> None:
+        first, second = RecordingGame("ONE"), RecordingGame("TWO")
+        with patched_runner([first, second]) as runner:
+            runner._running = True
             runner.on_encoder_push()  # open the switcher
+            runner.on_rotate(1)
             runner.on_button_pressed()
-            self.assertEqual(game.reset_calls, 0)
+            self.assertFalse(runner._menu_open)
+            self.assertEqual(runner._game_index, 1)
+            self.assertEqual(second.activations, 1)
+            self.assertEqual(first.reset_calls, 0)
+            self.assertEqual(second.reset_calls, 0)
 
     def test_rotating_cycles_the_active_games_own_views_when_menu_is_closed(
         self,
@@ -247,6 +256,15 @@ class SwitcherTests(unittest.TestCase):
             runner.on_encoder_push()
             runner.on_rotate(-1)
             self.assertEqual(runner._menu.selected_index, 1)
+
+    def test_encoder_pins_are_swapped_so_clockwise_is_clockwise(self) -> None:
+        games = [RecordingGame("ONE"), RecordingGame("TWO")]
+        with patched_runner(games) as runner:
+            encoder = runner._game_encoder_yellow_white
+            self.assertEqual(encoder.args, (19, 18))
+            encoder.when_rotated_clockwise()
+            encoder.when_rotated_counter_clockwise()
+            self.assertEqual(games[0].cycle_calls, [1, -1])
 
 
 class BootScreenTests(unittest.TestCase):

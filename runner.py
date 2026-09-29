@@ -44,10 +44,17 @@ class GameRunner:
         # separate from "booting"/"ready" as possible.
         self._button_led_red = LED(15)
         self._reset_button_green = Button(14, bounce_time=0.2)
-        self._game_encoder_yellow_white = RotaryEncoder(18, 19)
+        # A/B are deliberately given as (19, 18): with this encoder's
+        # wiring, the natural (18, 19) order reported clockwise turns as
+        # counter-clockwise. Swapping here makes gpiozero's "clockwise"
+        # physically clockwise, so the callbacks below mean what they say.
+        self._game_encoder_yellow_white = RotaryEncoder(19, 18)
         # The encoder's own integrated push switch, wired to its third pin
         # (GPIO 25) alongside the A/B pins above.
-        self._encoder_push_button = Button(25, bounce_time=0.2)
+        # A short debounce: gpiozero's bounce_time is a glitch filter, so
+        # any press shorter than it is dropped outright. 0.2 s swallowed
+        # ordinary quick clicks on the encoder.
+        self._encoder_push_button = Button(25, bounce_time=0.05)
         self._button_led_red.on()
         self._reset_button_green.when_pressed = self.on_button_pressed
         self._game_encoder_yellow_white.when_rotated_clockwise = (
@@ -157,15 +164,16 @@ class GameRunner:
             logger.info("Selected game: %s", type(new_game).__name__)
 
     def on_button_pressed(self) -> None:
-        """The button's one job everywhere now: force-refresh whatever's
-        on screen (games.base.Game.reset). It does nothing while the
-        switcher is open - on_encoder_push is what opens and confirms
-        that instead.
+        """Outside the switcher, the button force-refreshes whatever's on
+        screen (games.base.Game.reset). While the switcher is open it means
+        "select", exactly like pressing the encoder in again.
         """
         with self._game_lock:
-            if self._menu_open:
-                return
+            menu_open = self._menu_open
             game = self._games[self._game_index]
+        if menu_open:
+            self.on_encoder_push()
+            return
         game.reset()
 
     def on_rotate(self, direction: int) -> None:

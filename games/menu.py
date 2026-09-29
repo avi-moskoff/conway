@@ -11,12 +11,17 @@ from PIL import Image, ImageDraw
 
 from games.fonts import ticker_font
 
-# unscii-8's native row height, one label per row. At most five screens
-# exist today (three animations, two live views), well within the eight
-# rows that fit an 8px row height on a 64px-tall display - so this class
-# doesn't implement scrolling. If the roster ever grows past that, this
-# will need it.
-ROW_HEIGHT = 8
+# unscii-8's capital letters are 7px tall (labels are all caps; the 8th
+# row of its cell is only for descenders). Each row adds 1px of padding
+# above and below that, so the text never touches the edge of the
+# inverted highlight bar - and 1px on the left, for the same reason.
+# At most five screens exist today (three animations, two live views),
+# well within the seven rows that fit a 9px row height on a 64px-tall
+# display - so this class doesn't implement scrolling. If the roster ever
+# grows past that, this will need it.
+CAP_HEIGHT = 7
+TEXT_PADDING = 1
+ROW_HEIGHT = CAP_HEIGHT + 2 * TEXT_PADDING
 
 TEXT_COLOR = (255, 255, 255)
 
@@ -57,9 +62,9 @@ class ScreenMenu:
             y = index * ROW_HEIGHT
             if y >= self.height:
                 break
-            # The -1 y-offset matches Ticker.draw's - a baseline quirk of
-            # this font at this size, not something specific to the ticker.
-            draw.text((0, y - 1), label, fill=1, font=self._font)
+            # Pillow places unscii-8's capitals starting at exactly the y it's
+            # given, so offset by the padding.
+            draw.text((TEXT_PADDING, y + TEXT_PADDING), label, fill=1, font=self._font)
 
         # Same Pillow-tobytes-avoidance workaround as Ticker.draw.
         mask = np.asarray(list(canvas.get_flattened_data()), dtype=np.uint8)
