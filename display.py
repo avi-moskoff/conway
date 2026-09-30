@@ -1,6 +1,32 @@
+import os
+
 import numpy as np
 from PIL import Image
 from rgbmatrix import RGBMatrix, RGBMatrixOptions
+
+
+# Panel-timing knobs, tunable from the environment so flicker can be worked
+# on the Pi without a redeploy. Each is only applied when set; unset leaves
+# the value below (or the driver's own default).
+_TIMING_OPTIONS = (
+    ("CONWAY_LED_BRIGHTNESS", "brightness"),
+    ("CONWAY_LED_GPIO_SLOWDOWN", "gpio_slowdown"),
+    ("CONWAY_LED_PWM_BITS", "pwm_bits"),
+    ("CONWAY_LED_PWM_LSB_NANOSECONDS", "pwm_lsb_nanoseconds"),
+    ("CONWAY_LED_PWM_DITHER_BITS", "pwm_dither_bits"),
+    ("CONWAY_LED_LIMIT_REFRESH_HZ", "limit_refresh_rate_hz"),
+)
+
+
+def _apply_timing_overrides(options) -> None:
+    for variable, attribute in _TIMING_OPTIONS:
+        text = os.getenv(variable)
+        if text is None:
+            continue
+        try:
+            setattr(options, attribute, int(text))
+        except ValueError as error:
+            raise ValueError(f"{variable} must be an integer, got {text!r}") from error
 
 
 class MatrixDisplay:
@@ -21,6 +47,7 @@ class MatrixDisplay:
         options.hardware_mapping = "adafruit-hat"
         options.brightness = 50
         options.gpio_slowdown = 2
+        _apply_timing_overrides(options)
 
         self._matrix = RGBMatrix(options=options)
         self._canvas = self._matrix.CreateFrameCanvas()

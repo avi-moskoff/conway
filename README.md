@@ -237,6 +237,12 @@ is an error. Everything else is optional and falls back to the default shown.
 | ----------------------------------------------- | ------------------------ | ------------------------------------------------------------------------- |
 | `CONWAY_HOME_LATITUDE`, `CONWAY_HOME_LONGITUDE` | unset (live views off)   | Center of every live map.                                                 |
 | `CONWAY_DISPLAY_ROTATION`                       | `180`                    | Degrees clockwise (`0`, `90`, `180`, `270`) applied to every screen.       |
+| `CONWAY_LED_BRIGHTNESS`                         | `50`                     | Panel brightness (1-100). Lower it to test whether flicker is power sag.  |
+| `CONWAY_LED_GPIO_SLOWDOWN`                      | `2`                      | Driver GPIO slowdown; raise for row glitches/ghosting.                    |
+| `CONWAY_LED_PWM_BITS`                           | driver default (`11`)    | Color depth (1-11). `8`-`9` raises the refresh rate and can cut flicker.  |
+| `CONWAY_LED_PWM_LSB_NANOSECONDS`                | driver default (`130`)   | Shortest PWM pulse; lower speeds up refresh.                              |
+| `CONWAY_LED_PWM_DITHER_BITS`                    | driver default (`0`)     | Time-dithering bits; raise for smoother low-brightness color.             |
+| `CONWAY_LED_LIMIT_REFRESH_HZ`                   | driver default (none)    | Cap the refresh rate for a steadier one.                                  |
 | `CONWAY_LOG_LEVEL`                              | `INFO`                   | `DEBUG`, `INFO`, `WARNING`, and so on.                                    |
 | `CONWAY_FLIGHT_RADIUS_NM`                       | `8`                      | Map radius for the aircraft and rail views (1-250).                       |
 | `CONWAY_ADSB_POLL_SECONDS`                      | `15`                     | Aircraft poll interval (minimum 5).                                       |
