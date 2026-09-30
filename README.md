@@ -45,40 +45,46 @@ animations.
 
 The live screens are north-up maps centered on your home location, drawn above
 an 8-pixel text ticker. Short labels stay centered and longer ones scroll. A
-single red pixel in the top-left corner means the latest poll of the current
-view's data source failed, so what you see may be out of date. A live screen
+inverted pixel in the top-left corner (whatever color is there, flipped) means
+the latest poll of the current view's data source failed, so what you see may
+be out of date; the ticker names the failure on the weather views. A live screen
 polls its data source only while it is selected.
 
 **Flight radar** has three views, and the encoder cycles through them while it's the active screen:
 
 - *Aircraft* shows nearby aircraft from [adsb.lol](https://adsb.lol/). The
-  closest aircraft is red and the rest are white. Home is the red center pixel,
-  and an optional airport appears as a red pixel too. The ticker shows the
+  closest aircraft is red and the rest are green. Home is the center pixel,
+  drawn by inverting whatever is under it, and an optional airport appears as
+  a blue pixel. The ticker shows the
   closest aircraft's callsign and, when one is available, its estimated route
   (for example `ABC123 PHX>LAX`). It reads `CLEAR SKY` when nothing is in range
   and `NO SIGNAL` when the data is stale.
 - *Westbound ETA* and *Eastbound ETA* show Valley Metro light rail. The A Line
   and Streetcar tracks are drawn in blue, with eastbound trains in green and
   westbound trains in yellow. The next train due at the A Line station nearest
-  home is drawn red, and the ticker counts down to it (`W ETA 4M`, `E ETA <1M`,
+  home is drawn white, and home itself is a fixed red center pixel on these two
+  views. The ticker counts down to it (`W ETA 4M`, `E ETA <1M`,
   or `--` when no arrival is known). It reads `NO RAIL` when the feed is stale.
   The track and station data is hardcoded for Valley Metro's Phoenix-Tempe-Mesa
   service, so these views are only useful near it.
 
 **Weather radar** also has three views, and the encoder cycles through them the same way:
 
-- *Conditions* shows temperature and a black→blue→white precipitation field,
-  with a ticker such as `72F CLEAR`.
-- *Air quality* colors the map on the EPA US AQI scale, from green through
-  yellow, orange, red, and purple to maroon, with a ticker such as
-  `AQI 42 GOOD`.
-- *Dust* is a live GOES satellite Dust RGB crop, for watching a dust storm or
-  haboob approach. The ticker shows the image time in UTC (`DUST 18:31Z`).
+- *Conditions* shows temperature and a cloud-and-rain field: black for clear
+  sky up to gray for overcast, shifting toward blue as rainfall rises, with a
+  ticker such as `72F CLEAR`.
+- *Air quality* colors the map on the US AQI scale with a single amber hue,
+  from black through amber to white, with a ticker such as `AQI 42 GOOD`.
+- *Dust* is a live GOES satellite Dust RGB crop filtered down to one signal:
+  pixels that match dust are magenta and everything else is black, for
+  watching a dust storm or haboob approach. The ticker shows the image time in UTC (`DUST 18:31Z`).
 
 The conditions and air-quality fields are interpolated from a small grid of
 points around home, so they read as a continuous map at the same north-up scale
 as the radar. Home and each configured landmark are single pixels drawn by
-inverting the color underneath, so they stand out against any field. Switching
+inverting the average color of their neighboring pixels (so a marker stays
+visible whatever is underneath), falling back to white or black when that
+inverse would be too close in brightness, as with mid-gray. Switching
 weather views also nudges the poller for the view you switch into, so one that
 is waiting out a retry backoff after a failure tries again immediately.
 
@@ -145,6 +151,10 @@ The yellow encoder wire uses GPIO 18. Install the RGB matrix driver using its
 **convenience** option. The driver's quality option requires a connection
 between GPIO 4 and GPIO 18 and therefore conflicts with the encoder wiring in
 this project.
+
+The panel flickers in this configuration. The planned fix - moving the encoder
+off GPIO 18 and soldering the GPIO 4 to GPIO 18 jumper - is written up in
+[docs/hardware-pwm-mod.md](docs/hardware-pwm-mod.md).
 
 ## Controls
 
@@ -260,7 +270,7 @@ is an error. Everything else is optional and falls back to the default shown.
 ### Aircraft
 
 The airport coordinates are optional. When present and within the displayed
-radius, the airport appears as a red pixel. Routes are inferred from callsigns
+radius, the airport appears as a blue pixel. Routes are inferred from callsigns
 and shown only when adsb.lol has route data and marks it plausible.
 
 The public [adsb.lol](https://adsb.lol/) service is used by default. Aircraft

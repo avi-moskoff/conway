@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import numpy as np
 
 from config import WeatherRadarConfig
+from games.base import invert_neighborhood
 from games.weather_radar import WeatherRadarGame, _classify_weather_error
 from weather import (
     GoesDustApiError,
@@ -102,11 +103,18 @@ class WeatherRadarGameTests(unittest.TestCase):
         frame = self.game.frame
         underlying_field = self.game._conditions_field
         center_x, center_y = self.game.width // 2, self.game._radar_height // 2
-        home_pixel = 255 - underlying_field[center_y, center_x]
-        np.testing.assert_array_equal(frame[center_y, center_x], home_pixel)
         landmark_x, landmark_y = self.game._landmark_pixels[0]
-        landmark_pixel = 255 - underlying_field[landmark_y, landmark_x]
-        np.testing.assert_array_equal(frame[landmark_y, landmark_x], landmark_pixel)
+        # Markers are the inverse of their neighbors' average.
+        expected = underlying_field.copy()
+        invert_neighborhood(
+            expected, [*self.game._landmark_pixels, (center_x, center_y)]
+        )
+        np.testing.assert_array_equal(
+            frame[center_y, center_x], expected[center_y, center_x]
+        )
+        np.testing.assert_array_equal(
+            frame[landmark_y, landmark_x], expected[landmark_y, landmark_x]
+        )
 
     def test_cycle_view_steps_conditions_aqi_dust_and_wraps(self) -> None:
         # Mode switching moved from reset() to cycle_view() - the encoder's
@@ -221,11 +229,18 @@ class WeatherRadarGameTests(unittest.TestCase):
         frame = self.game.frame
         underlying_field = self.game._dust_field
         center_x, center_y = self.game.width // 2, self.game._radar_height // 2
-        home_pixel = 255 - underlying_field[center_y, center_x]
-        np.testing.assert_array_equal(frame[center_y, center_x], home_pixel)
         landmark_x, landmark_y = self.game._dust_landmark_pixels[0]
-        landmark_pixel = 255 - underlying_field[landmark_y, landmark_x]
-        np.testing.assert_array_equal(frame[landmark_y, landmark_x], landmark_pixel)
+        # Markers are the inverse of their neighbors' average.
+        expected = underlying_field.copy()
+        invert_neighborhood(
+            expected, [*self.game._dust_landmark_pixels, (center_x, center_y)]
+        )
+        np.testing.assert_array_equal(
+            frame[center_y, center_x], expected[center_y, center_x]
+        )
+        np.testing.assert_array_equal(
+            frame[landmark_y, landmark_x], expected[landmark_y, landmark_x]
+        )
 
     def test_stale_dust_data_shows_no_signal(self) -> None:
         self._seed()

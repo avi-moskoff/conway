@@ -65,7 +65,7 @@ class FlightRadarGame(Game):
     # A single-channel primary, safe for an isolated pixel, that means one
     # specific thing within whichever mode is on screen.
     airport_color = (0, 0, 255)
-    other_aircraft_color = (255, 255, 255)
+    other_aircraft_color = (0, 255, 0)
     eastbound_train_color = (0, 255, 0)
     westbound_train_color = (255, 230, 0)
     # Full blue is fine now that home is a fixed red pixel on the rail

@@ -188,9 +188,26 @@ class FlightRadarGameTests(unittest.TestCase):
         x, y = airport_pixel
         frame[y, x] = 0
         self.assertFalse(np.any(np.all(frame == self.game.rail_line_color, axis=2)))
-        self.assertFalse(
-            np.any(np.all(frame == self.game.eastbound_train_color, axis=2))
+        # Other aircraft share eastbound_train_color (green) - the two are
+        # never on screen in the same mode - so the train itself is checked
+        # by position, not by color.
+        radar_height = self.game.height - self.game.ticker_height - 1
+        train_pixel = project_position(
+            33.0, -111.98, 33.0, -112.0, self.game._config.radius_nm,
+            self.game.width, radar_height,
         )
+        aircraft_pixels = {
+            project_position(
+                plane.latitude, plane.longitude, 33.0, -112.0,
+                self.game._config.radius_nm, self.game.width, radar_height,
+            )
+            for plane in self.client.nearby_aircraft(0, 0, 0)
+        }
+        if train_pixel not in aircraft_pixels:
+            tx, ty = train_pixel
+            self.assertFalse(
+                np.all(frame[ty, tx] == self.game.eastbound_train_color)
+            )
 
     def test_error_flag_only_reflects_the_active_modes_feed(self) -> None:
         # An ADS-B error shows in aircraft mode...
@@ -242,11 +259,10 @@ class FlightRadarGameTests(unittest.TestCase):
         frame = self.game.frame
         radar = frame[: -self.game.ticker_height].copy()
 
-        # other_aircraft_color == ticker_text_color (both white), so check
-        # only the radar area - the ticker legitimately renders white text.
-        # Home is also white here (it inverts a black background - see
-        # games.base.invert_pixel), which isn't an aircraft either, so
-        # blank it out before checking for a stray aircraft color.
+        # Check only the radar area. Home is white here (it inverts a
+        # black background - see games.base.invert_pixel), which isn't an
+        # aircraft either, so blank it out before checking for a stray
+        # aircraft color.
         home_x, home_y = self.game.width // 2, radar_height // 2
         radar[home_y, home_x] = 0
         self.assertFalse(

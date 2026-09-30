@@ -68,6 +68,40 @@ def invert_pixel(frame: np.ndarray, x: int, y: int) -> None:
     frame[y, x] = 255 - frame[y, x]
 
 
+# Minimum brightness gap (0-255 luma) between a marker and its neighbors;
+# below it the plain inverse is too close to read.
+MARKER_MIN_CONTRAST = 100
+
+
+def _luma(color: np.ndarray) -> float:
+    return float(0.299 * color[0] + 0.587 * color[1] + 0.114 * color[2])
+
+
+def invert_neighborhood(frame: np.ndarray, points: list[tuple[int, int]]) -> None:
+    """Mark each of `points` with the inverse of the average of its
+    neighboring pixels (the 8 around it, not the pixel itself), in place.
+
+    For markers sitting on a continuous field - weather landmarks and home.
+    The neighbors' average is what the eye compares the marker against,
+    not the pixel's own color. But inversion alone fails on mid-gray, whose
+    inverse is nearly the same gray, so when the inverse is within
+    MARKER_MIN_CONTRAST of the average in brightness the marker falls back
+    to whichever of black or white is farther from it. Every marker is
+    computed from the frame as it was before any were drawn, so markers next
+    to each other don't tint one another.
+    """
+    source = frame.copy()
+    for x, y in points:
+        window = source[max(y - 1, 0) : y + 2, max(x - 1, 0) : x + 2].reshape(-1, 3)
+        # Drop the pixel itself from the window's average.
+        total = window.sum(axis=0, dtype=np.int64) - source[y, x]
+        average = np.rint(total / (len(window) - 1)).astype(np.uint8)
+        marker = 255 - average
+        if abs(_luma(marker) - _luma(average)) < MARKER_MIN_CONTRAST:
+            marker = np.full(3, 0 if _luma(average) >= 128 else 255, dtype=np.uint8)
+        frame[y, x] = marker
+
+
 # Fixed location for the degraded-state indicator on every live screen.
 # Position (corner vs. wherever self/home is drawn), not color, is what
 # tells the two invert-markers apart - see invert_pixel and the palette

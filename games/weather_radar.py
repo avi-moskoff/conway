@@ -13,7 +13,7 @@ from air_traffic.projection import (
     project_position,
 )
 from config import WeatherRadarConfig
-from games.base import Game, invert_pixel, mark_error
+from games.base import Game, invert_neighborhood, mark_error
 from games.ticker import Ticker
 from weather import (
     AirQualitySample,
@@ -369,13 +369,11 @@ class WeatherRadarGame(Game):
             show_error = dust_error_kind is not None and not stale
             landmark_pixels = self._dust_landmark_pixels
 
-        # Self/home and landmarks are drawn by inverting whatever's
-        # already there rather than a fixed color - see
-        # games.base.invert_pixel.
-        for x, y in landmark_pixels:
-            invert_pixel(frame, x, y)
+        # Self/home and landmarks are drawn as the inverse of their
+        # neighbors' average rather than a fixed color - see
+        # games.base.invert_neighborhood.
         center_x, center_y = self.width // 2, self._radar_height // 2
-        invert_pixel(frame, center_x, center_y)
+        invert_neighborhood(frame, [*landmark_pixels, (center_x, center_y)])
         if show_error:
             mark_error(frame)
         self._ticker.draw(frame, label)
