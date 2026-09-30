@@ -4,6 +4,7 @@ from threading import Event, Lock, Thread
 from time import monotonic
 
 import numpy as np
+from scipy.interpolate import RectBivariateSpline
 
 from air_traffic.projection import (
     offset_nautical_miles,
@@ -183,6 +184,8 @@ class WeatherRadarGame(Game):
             self.width - 1, 0, config.radius_nm, self.width, self._radar_height
         )
         self._query_points = self._build_query_points(max_east, max_north)
+        self._grid_east = np.linspace(-max_east, max_east, self.grid_size)
+        self._grid_north = np.linspace(-max_north, max_north, self.grid_size)
         self._pixel_east, self._pixel_north = self._build_pixel_grid(config.radius_nm)
         self._landmark_pixels = self._build_landmark_pixels(config.radius_nm)
 
@@ -519,12 +522,12 @@ class WeatherRadarGame(Game):
 
     def _store_conditions(self, samples: tuple[WeatherSample, ...]) -> None:
         easts, norths = self._offsets_for_samples(samples)
-        cloud = self._idw(
+        cloud = self._interpolate(
             easts,
             norths,
             np.array([sample.cloud_cover_percent for sample in samples]),
         )
-        precipitation = self._idw(
+        precipitation = self._interpolate(
             easts,
             norths,
             np.array([sample.precipitation_mm for sample in samples]),
@@ -541,7 +544,7 @@ class WeatherRadarGame(Game):
         easts, norths = self._offsets_for_samples(samples)
         values = np.array([sample.us_aqi for sample in samples])
         field = self._colorize_field(
-            self._idw(easts, norths, values), self.aqi_stops_t, self.aqi_stops_rgb
+            self._interpolate(easts, norths, values), self.aqi_stops_t, self.aqi_stops_rgb
         )
         closest = samples[int(np.argmin(easts * easts + norths * norths))]
         with self._data_lock:
@@ -562,6 +565,26 @@ class WeatherRadarGame(Game):
         easts = np.array([east for east, _north in offsets])
         norths = np.array([north for _east, north in offsets])
         return easts, norths
+
+    def _interpolate(
+        self, sample_east: np.ndarray, sample_north: np.ndarray, values: np.ndarray
+    ) -> np.ndarray:
+        """Field from the regular query grid: bilinear interpolation.
+
+        Inverse-distance weighting was used originally, but its weight
+        blows up at each sample point, leaving a flat bull's-eye plateau
+        around every one of the 25 samples (a visible regular lattice of
+        dots). A cubic spline fixed that but overshot around sharp jumps
+        (one rainy sample beside dry ones) and looked patchy. Bilinear
+        can't overshoot, so it needs no clamping. If any sample was
+        dropped (the grid is no longer complete), fall back to IDW, which
+        needs no regular grid.
+        """
+        if values.size != self.grid_size * self.grid_size:
+            return self._idw(sample_east, sample_north, values)
+        grid = values.reshape(self.grid_size, self.grid_size)  # [north, east]
+        spline = RectBivariateSpline(self._grid_north, self._grid_east, grid, kx=1, ky=1)
+        return spline(self._pixel_north, self._pixel_east, grid=False)
 
     def _idw(
         self, sample_east: np.ndarray, sample_north: np.ndarray, values: np.ndarray

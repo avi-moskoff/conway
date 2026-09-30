@@ -269,6 +269,18 @@ class ApplyDustFilterTests(unittest.TestCase):
         result = apply_dust_filter(pixel)
         self.assertEqual(tuple(result[0, 0]), DUST_MATCH_RGB)
 
+    def test_blue_violet_airmass_wash_is_not_matched(self) -> None:
+        # Median pixel from a real evening GOES-19 frame over Phoenix: cool,
+        # moist background (hue ~231), no plume. Must not read as dust.
+        pixel = np.array([[[129, 119, 218]]], dtype=np.uint8)
+        result = apply_dust_filter(pixel)
+        self.assertEqual(tuple(result[0, 0]), DUST_BACKDROP_RGB)
+
+    def test_hue_floor_separates_violet_from_plum(self) -> None:
+        # hue ~260 (violet, saturated) is excluded; hue ~285 plum is not.
+        violet = np.array([[[110, 60, 200]]], dtype=np.uint8)
+        self.assertEqual(tuple(apply_dust_filter(violet)[0, 0]), DUST_BACKDROP_RGB)
+
     def test_cloud_green_is_not_matched(self) -> None:
         # Mid-level thin cloud, per the guides, reads as green - nowhere
         # near the purple/plum-to-pink/magenta dust band.

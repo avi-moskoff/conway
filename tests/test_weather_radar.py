@@ -267,6 +267,53 @@ class WeatherRadarGameTests(unittest.TestCase):
         self.assertEqual(tuple(int(v) for v in colors[1]), (128, 96, 0))
         self.assertEqual(tuple(int(v) for v in colors[2]), (255, 255, 255))
 
+    def _uniform_samples(self, cloud: float, overrides: dict[int, float]):
+        return tuple(
+            WeatherSample(
+                latitude=lat,
+                longitude=lon,
+                temperature_f=80.0,
+                precipitation_mm=0.0,
+                weather_code=0,
+                cloud_cover_percent=overrides.get(index, cloud),
+            )
+            for index, (lat, lon) in enumerate(self.game._query_points)
+        )
+
+    def test_interpolation_reproduces_sample_values_at_grid_points(self) -> None:
+        game = self.game
+        values = np.arange(25, dtype=float).reshape(5, 5) * 4.0
+        field = game._interpolate(np.zeros(25), np.zeros(25), values.ravel())
+        # The pixel nearest each grid node should read back roughly that
+        # node's value (within one pixel's worth of gradient).
+        for row, north in enumerate(game._grid_north):
+            for col, east in enumerate(game._grid_east):
+                distance = (game._pixel_east - east) ** 2 + (game._pixel_north - north) ** 2
+                y, x = np.unravel_index(np.argmin(distance), distance.shape)
+                self.assertAlmostEqual(field[y, x], values[row, col], delta=4.0)
+
+    def test_a_single_dark_sample_leaves_no_bullseye_plateau(self) -> None:
+        # One clear sample amid overcast: IDW left a flat dark disc around
+        # it; the spline should ramp smoothly instead, so no two adjacent
+        # pixels jump by more than a small step anywhere.
+        samples = self._uniform_samples(100.0, {12: 0.0})
+        self.game._store_conditions(samples)
+        field = self.game._conditions_field.astype(int)
+        self.assertLess(np.abs(np.diff(field, axis=0)).max(), 40)
+        self.assertLess(np.abs(np.diff(field, axis=1)).max(), 40)
+
+    def test_interpolation_never_overshoots_the_sampled_range(self) -> None:
+        values = np.zeros(25)
+        values[12] = 100.0
+        field = self.game._interpolate(np.zeros(25), np.zeros(25), values)
+        self.assertGreaterEqual(field.min(), 0.0)
+        self.assertLessEqual(field.max(), 100.0)
+
+    def test_incomplete_grid_falls_back_to_idw(self) -> None:
+        samples = self._uniform_samples(50.0, {})[:-1]
+        self.game._store_conditions(samples)  # must not raise
+        self.assertEqual(self.game._conditions_field.shape[-1], 3)
+
     def test_conditions_are_black_when_clear_and_dry(self) -> None:
         colors = self.game._compose_conditions(np.array([0.0]), np.array([0.0]))
         self.assertEqual(tuple(int(v) for v in colors[0]), (0, 0, 0))

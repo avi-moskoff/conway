@@ -215,13 +215,18 @@ def sector_pixel_for(latitude: float, longitude: float) -> tuple[float, float]:
 # cloud); and a low value floor (excludes the near-black high, thin ice
 # clouds both guides describe, without cutting off darker nighttime dust).
 #
-# Kept deliberately wide, per the same false-alarm-vs-miss asymmetry that
-# shapes the rest of this screen: a false alarm costs a glance, a missed
-# haboob defeats the point. Still a living constant - refine it the next
+# The hue floor was originally 255 deg, but a real evening frame over
+# Phoenix showed the ordinary cool/moist blue-violet airmass wash (hue
+# ~230-270 deg, no plume shape) lighting up ~12% of the display as
+# false-positive dust; 280 deg drops that to ~3% while still admitting the
+# plum end of the guides' range. Otherwise kept wide, per the same
+# false-alarm-vs-miss asymmetry that shapes the rest of this screen: a
+# false alarm costs a glance, a missed haboob defeats the point. Still a
+# living constant - refine it the next
 # time a real haboob passes over and can be eyeballed against it, the same
 # way this module's own sector calibration above is treated - not a final
 # answer.
-DUST_HUE_MIN_DEGREES = 255.0
+DUST_HUE_MIN_DEGREES = 280.0
 DUST_HUE_MAX_DEGREES = 355.0
 DUST_SATURATION_MIN = 0.20
 DUST_VALUE_MIN = 0.15
