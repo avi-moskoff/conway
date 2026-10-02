@@ -2,7 +2,7 @@ import random
 
 import numpy as np
 
-from games.base import Game
+from games.base import Game, draw_pause_icon
 
 # Grid steps as (dx, dy), in clockwise order so a +1 knob click is a right
 # turn: UP -> RIGHT -> DOWN -> LEFT.
@@ -13,7 +13,7 @@ class SnakeGame(Game):
     """Snake on a walled grid of CELL_SIZE-pixel cells, steered by the
     encoder: each click turns the head 90 degrees (clockwise for
     clockwise). Hitting a wall or yourself ends the game. The button
-    restarts.
+    pauses and resumes (or, once the snake is dead, restarts right away).
     """
 
     frame_delay_seconds = 0.15
@@ -40,6 +40,7 @@ class SnakeGame(Game):
         self.heading = 1
         self.food = self._place_food()
         self.alive = True
+        self.paused = False
         self._dead_frames = 0
 
     def _place_food(self) -> tuple[int, int] | None:
@@ -52,11 +53,19 @@ class SnakeGame(Game):
         ]
         return random.choice(free) if free else None
 
-    def cycle_view(self, direction: int) -> None:
+    def press_button(self) -> None:
         if self.alive:
+            self.paused = not self.paused
+        else:
+            self.reset()
+
+    def cycle_view(self, direction: int) -> None:
+        if self.alive and not self.paused:
             self.heading = (self.heading + direction) % len(_HEADINGS)
 
     def advance(self) -> None:
+        if self.paused:
+            return
         if not self.alive:
             self._dead_frames += 1
             if self._dead_frames >= self.GAME_OVER_FRAMES:
@@ -95,4 +104,9 @@ class SnakeGame(Game):
                 cells[y, x] = self._BODY
             x, y = self.snake[0]
             cells[y, x] = self._HEAD
-        return np.repeat(np.repeat(cells, self.CELL_SIZE, axis=0), self.CELL_SIZE, axis=1)
+        frame = np.repeat(
+            np.repeat(cells, self.CELL_SIZE, axis=0), self.CELL_SIZE, axis=1
+        )
+        if self.paused:
+            draw_pause_icon(frame)
+        return frame

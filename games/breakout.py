@@ -3,7 +3,7 @@ import random
 
 import numpy as np
 
-from games.base import Game
+from games.base import Game, draw_pause_icon
 
 
 class BreakoutGame(Game):
@@ -11,8 +11,9 @@ class BreakoutGame(Game):
     The ball waits on the paddle until the button launches it; while it
     waits, the knob aims the launch (an indicator shows the heading) and
     the paddle stays put. Once it's in play, the knob slides the paddle
-    and the button restarts the game instead. Clearing every brick
-    deals a fresh wall; losing all lives restarts.
+    and the button pauses and resumes. Clearing a whole row drops the rows
+    above it down one and adds a fresh row on top, so the wall never runs
+    out. Losing all lives restarts.
     """
 
     frame_delay_seconds = 0.03
@@ -51,12 +52,17 @@ class BreakoutGame(Game):
         self.paddle_y = height - self.PADDLE_ROW_OFFSET
         self.waiting_to_serve = False
         self.aim_degrees = 0
+        self.paused = False
         self.reset()
 
-    def reset(self) -> None:
+    def press_button(self) -> None:
         if self.waiting_to_serve:
             self._launch()
-            return
+        else:
+            self.paused = not self.paused
+
+    def reset(self) -> None:
+        self.paused = False
         self.lives = self.LIVES
         self._deal_bricks()
         self._serve()
@@ -69,6 +75,14 @@ class BreakoutGame(Game):
 
     def _deal_bricks(self) -> None:
         self.bricks = np.ones((self.BRICK_ROWS, self.BRICK_COLUMNS), dtype=bool)
+
+    def _drop_rows_above(self, cleared_row: int) -> None:
+        """Remove an emptied row: everything above it drops one row and a
+        fresh full row appears on top. The wall's bottom edge never moves
+        lower than where it started, so this can't crowd the paddle.
+        """
+        self.bricks[1 : cleared_row + 1] = self.bricks[:cleared_row].copy()
+        self.bricks[0] = True
 
     def _serve(self) -> None:
         self.paddle_x = (self.width - self.PADDLE_WIDTH) // 2
@@ -83,6 +97,8 @@ class BreakoutGame(Game):
         self.ball_y = float(self.paddle_y - 1)
 
     def cycle_view(self, direction: int) -> None:
+        if self.paused:
+            return
         if self.waiting_to_serve:
             self.aim_degrees = min(
                 max(
@@ -148,7 +164,7 @@ class BreakoutGame(Game):
         )
 
     def advance(self) -> None:
-        if self.waiting_to_serve:
+        if self.waiting_to_serve or self.paused:
             return
 
         new_x = self.ball_x + self.vx
@@ -179,10 +195,8 @@ class BreakoutGame(Game):
             self.bricks[hit] = False
             self._bounce_off(hit, new_x, new_y)
             new_x, new_y = self.ball_x, self.ball_y
-            if not self.bricks.any():
-                self._deal_bricks()
-                self._serve()
-                return
+            if not self.bricks[hit[0]].any():
+                self._drop_rows_above(hit[0])
 
         self.ball_x, self.ball_y = new_x, new_y
 
@@ -217,6 +231,8 @@ class BreakoutGame(Game):
                 y = int(self.ball_y - math.cos(angle) * step)
                 if 0 <= x < self.width and 0 <= y < self.height:
                     frame[y, x] = self._AIM
+        if self.paused:
+            draw_pause_icon(frame)
         ball_x, ball_y = int(self.ball_x), int(self.ball_y)
         if 0 <= ball_x < self.width and 0 <= ball_y < self.height:
             frame[ball_y, ball_x] = self._BALL

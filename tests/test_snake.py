@@ -58,6 +58,21 @@ class SnakeTests(unittest.TestCase):
             self.game.advance()
         self.assertTrue(self.game.alive)
 
+    def test_button_pauses_and_resumes(self) -> None:
+        head = self.game.snake[0]
+        self.game.press_button()
+        self.game.cycle_view(1)
+        self.game.advance()
+        self.assertEqual(self.game.snake[0], head)
+        self.game.press_button()
+        self.game.advance()
+        self.assertEqual(self.game.snake[0], (head[0] + 1, head[1]))
+
+    def test_button_restarts_once_dead(self) -> None:
+        self.game.alive = False
+        self.game.press_button()
+        self.assertTrue(self.game.alive)
+
     def test_menu_label_fits_the_switcher(self) -> None:
         self.assertLessEqual(len(SnakeGame.menu_label), 7)
 

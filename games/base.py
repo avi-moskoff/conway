@@ -42,6 +42,16 @@ class Game(ABC):
     def advance(self) -> None:
         """Advance the game by one frame."""
 
+    def press_button(self) -> None:
+        """The reset button was pressed while this screen is showing.
+
+        Defaults to reset() - "give me something new" - which is what every
+        ambient screen wants. The arcade screens override it: the button
+        pauses there (and launches Breakout's ball), since an accidental
+        restart mid-game is costly.
+        """
+        self.reset()
+
     def cycle_view(self, direction: int) -> None:
         """Switch to a sibling view within this screen, if it has more
         than one. `direction` is +1 or -1 (forward/backward).
@@ -52,6 +62,13 @@ class Game(ABC):
         through their display_modes - the same cycling reset() used to do
         before the button became a pure force-refresh verb.
         """
+
+
+def draw_pause_icon(frame: np.ndarray) -> None:
+    """Stamp a white pause glyph (two 5px bars) in the top-right corner."""
+    width = frame.shape[1]
+    frame[1:6, width - 6] = (255, 255, 255)
+    frame[1:6, width - 4] = (255, 255, 255)
 
 
 def invert_pixel(frame: np.ndarray, x: int, y: int) -> None:

@@ -17,7 +17,7 @@ class BreakoutTests(unittest.TestCase):
         self.game.cycle_view(1)
         self.assertEqual(self.game.paddle_x, start)
         self.assertEqual(self.game.aim_degrees, 2 * BreakoutGame.AIM_STEP_DEGREES)
-        self.game.reset()
+        self.game.press_button()
         self.assertGreater(self.game.vx, 0)
         self.assertLess(self.game.vy, 0)
 
@@ -27,7 +27,7 @@ class BreakoutTests(unittest.TestCase):
         self.assertEqual(self.game.aim_degrees, -BreakoutGame.AIM_LIMIT_DEGREES)
 
     def test_knob_moves_paddle_and_clamps(self) -> None:
-        self.game.reset()
+        self.game.press_button()
         start = self.game.paddle_x
         self.game.cycle_view(1)
         self.assertEqual(self.game.paddle_x, start + BreakoutGame.PADDLE_STEP)
@@ -39,17 +39,21 @@ class BreakoutTests(unittest.TestCase):
         for _ in range(100):
             self.game.advance()
         self.assertEqual((self.game.vx, self.game.vy), (0.0, 0.0))
-        self.game.reset()
+        self.game.press_button()
         self.assertLess(self.game.vy, 0)
 
-    def test_button_restarts_while_ball_in_play(self) -> None:
-        self.game.reset()
-        self.game.bricks[0, 0] = False
-        self.game.lives = 1
-        self.game.reset()
-        self.assertTrue(self.game.bricks.all())
-        self.assertEqual(self.game.lives, BreakoutGame.LIVES)
-        self.assertTrue(self.game.waiting_to_serve)
+    def test_button_pauses_and_resumes_while_ball_in_play(self) -> None:
+        self.game.press_button()  # launch
+        self.game.press_button()  # pause
+        ball = (self.game.ball_x, self.game.ball_y)
+        paddle = self.game.paddle_x
+        self.game.advance()
+        self.game.cycle_view(1)
+        self.assertEqual((self.game.ball_x, self.game.ball_y), ball)
+        self.assertEqual(self.game.paddle_x, paddle)
+        self.game.press_button()
+        self.game.advance()
+        self.assertNotEqual((self.game.ball_x, self.game.ball_y), ball)
 
     def test_brick_hit_removes_brick_and_bounces(self) -> None:
         self.launch(0.0, -1.0)
@@ -72,12 +76,14 @@ class BreakoutTests(unittest.TestCase):
     def test_bottom_hit_flips_vertical_not_horizontal(self) -> None:
         self.game.bricks[:] = False
         self.game.bricks[0, 3] = True  # y 8..10
+        self.game.bricks[0, 4] = True
         self.game.bricks[1, 3] = True
+        self.game.bricks[1, 4] = True
         self.launch(0.3, -1.0)
         self.game.ball_x, self.game.ball_y = 26.0, 14.0
         for _ in range(8):
             self.game.advance()
-            if not self.game.bricks[1, 3]:
+            if self.game.bricks[1].sum() == 1:
                 break
         self.assertFalse(self.game.bricks[1, 3])
         self.assertGreater(self.game.vy, 0)
@@ -108,14 +114,20 @@ class BreakoutTests(unittest.TestCase):
             self.game.advance()
         self.assertEqual(self.game.lives, BreakoutGame.LIVES - 1)
 
-    def test_clearing_all_bricks_deals_new_wall(self) -> None:
+    def test_clearing_a_row_drops_rows_above_and_adds_one_on_top(self) -> None:
         self.game.bricks[:] = False
-        self.game.bricks[0, 0] = True
+        self.game.bricks[0, :] = True
+        self.game.bricks[1, 5] = True
+        self.game.bricks[2, 3] = True  # the last brick of row 2
         self.launch(0.0, -1.0)
-        self.game.ball_x = 4.0
-        self.game.ball_y = float(BreakoutGame.BRICK_TOP + 1)
+        self.game.ball_x = 28.0
+        self.game.ball_y = float(BreakoutGame.BRICK_TOP + 3 * 3 - 1)
         self.game.advance()
-        self.assertTrue(self.game.bricks.all())
+        bricks = self.game.bricks
+        self.assertTrue(bricks[0].all())  # fresh top row
+        self.assertTrue(bricks[1].all())  # old row 0, dropped
+        self.assertEqual(list(bricks[2].nonzero()[0]), [5])  # old row 1
+        self.assertFalse(bricks[3].any())  # unchanged below the cleared row
 
     def test_menu_label_fits_the_switcher(self) -> None:
         # unscii-8 at 8px/char plus 1px padding each side: 7 chars max.

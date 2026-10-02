@@ -167,7 +167,8 @@ class GameRunner:
 
     def on_button_pressed(self) -> None:
         """Outside the switcher, the button force-refreshes whatever's on
-        screen (games.base.Game.reset). While the switcher is open it means
+        screen (games.base.Game.press_button, which is reset() unless a game
+        overrides it). While the switcher is open it means
         "select", exactly like pressing the encoder in again.
         """
         with self._game_lock:
@@ -176,7 +177,7 @@ class GameRunner:
         if menu_open:
             self.on_encoder_push()
             return
-        game.reset()
+        game.press_button()
 
     def on_rotate(self, direction: int) -> None:
         """Rotating the encoder is context-dependent: while the switcher
