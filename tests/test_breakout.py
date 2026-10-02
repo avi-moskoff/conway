@@ -1,4 +1,7 @@
 import unittest
+from unittest.mock import patch
+
+from PIL import Image
 
 from games.breakout import BreakoutGame
 
@@ -152,6 +155,14 @@ class BreakoutTests(unittest.TestCase):
         self.assertTrue((drawn != blank).any())
         self.game.reset()
         self.assertEqual(self.game.rows_cleared, 0)
+
+    def test_frame_never_calls_pil_tobytes(self) -> None:
+        # On the Pi, Image.tobytes() lazily imports PIL.ImageFile, which
+        # fails after the matrix drops root privileges (see
+        # games.ticker's note on avoiding __array_interface__).
+        self.game.rows_cleared = 42
+        with patch.object(Image.Image, "tobytes", side_effect=ImportError):
+            self.assertEqual(self.game.frame.shape, (64, 64, 3))
 
     def test_menu_label_fits_the_switcher(self) -> None:
         # unscii-8 at 8px/char plus 1px padding each side: 7 chars max.

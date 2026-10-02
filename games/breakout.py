@@ -60,6 +60,7 @@ class BreakoutGame(Game):
         self.waiting_to_serve = False
         self.aim_degrees = 0
         self.paused = False
+        self._score_mask_cache: tuple[str, np.ndarray] = ("", np.zeros((8, 0), bool))
         self.reset()
 
     def press_button(self) -> None:
@@ -216,11 +217,21 @@ class BreakoutGame(Game):
             else:
                 self._serve()
 
+    def _score_mask(self) -> np.ndarray:
+        """The score as an 8 x (4 digits) boolean mask, cached per value."""
+        text = str(self.rows_cleared % 10**self.SCORE_DIGITS)
+        if self._score_mask_cache[0] != text:
+            width = self.SCORE_DIGITS * 8
+            canvas = Image.new("1", (width, 8), 0)
+            draw_text(ImageDraw.Draw(canvas), (0, 0), text, ticker_font())
+            # Same idiom as games.menu / games.ticker: np.asarray on a
+            # 1-bit PIL image isn't reliable across Pillow versions.
+            pixels = np.asarray(list(canvas.get_flattened_data()), dtype=np.uint8)
+            self._score_mask_cache = (text, pixels.reshape(8, width).astype(bool))
+        return self._score_mask_cache[1]
+
     def _draw_score(self, frame: np.ndarray) -> None:
-        text = str(self.rows_cleared % 10 ** self.SCORE_DIGITS)
-        canvas = Image.new("1", (self.SCORE_DIGITS * 8, 8), 0)
-        draw_text(ImageDraw.Draw(canvas), (0, 0), text, ticker_font())
-        mask = np.asarray(canvas, dtype=bool)
+        mask = self._score_mask()
         region = frame[0:8, self.SCORE_X : self.SCORE_X + mask.shape[1]]
         region[mask[:, : region.shape[1]]] = self._SCORE
 
