@@ -40,8 +40,9 @@ animations.
   center. The button clears the board and returns the ant to the center.
 - **Boids** is a flock of 36 white boids steering around eight red obstacle
   pixels. The button scatters a new flock and new obstacles.
-- **Snake** is played on a wrapped 32x32 grid. Turning the knob turns the
-  snake's head 90 degrees per click; the button restarts.
+- **Snake** is played on a walled 32x32 grid at a constant speed. Turning the knob turns the
+  snake's head 90 degrees per click; hitting a wall or yourself ends the game,
+  and the button restarts.
 
 ### Live views
 

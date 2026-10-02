@@ -23,13 +23,25 @@ class SnakeTests(unittest.TestCase):
         self.game.advance()
         self.assertEqual(self.game.snake[0][0], head[0] + 1)
 
-    def test_double_turn_cannot_reverse_into_neck(self) -> None:
+    def test_double_turn_reverses_into_neck_and_dies(self) -> None:
         self.game.cycle_view(1)
         self.game.cycle_view(1)
         self.game.advance()
-        self.assertTrue(self.game.alive)
+        self.assertFalse(self.game.alive)
 
-    def test_eating_grows_and_wraps(self) -> None:
+    def test_wall_ends_game(self) -> None:
+        self.game.snake = [(self.game.columns - 1, 5), (self.game.columns - 2, 5)]
+        self.game.advance()
+        self.assertFalse(self.game.alive)
+
+    def test_speed_is_constant_when_eating(self) -> None:
+        delay = self.game.frame_delay_seconds
+        x, y = self.game.snake[0]
+        self.game.food = (x + 1, y)
+        self.game.advance()
+        self.assertEqual(self.game.frame_delay_seconds, delay)
+
+    def test_eating_grows(self) -> None:
         x, y = self.game.snake[0]
         self.game.food = (x + 1, y)
         self.game.advance()
@@ -38,7 +50,7 @@ class SnakeTests(unittest.TestCase):
 
     def test_self_collision_ends_then_restarts(self) -> None:
         self.game.snake = [(5, 5), (5, 6), (4, 6), (4, 5), (4, 4), (5, 4)]
-        self.game.heading = self.game._moved_heading = 0
+        self.game.heading = 0
         self.game.cycle_view(-1)  # face left into (4, 5)
         self.game.advance()
         self.assertFalse(self.game.alive)

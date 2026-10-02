@@ -10,9 +10,10 @@ _HEADINGS = ((0, -1), (1, 0), (0, 1), (-1, 0))
 
 
 class SnakeGame(Game):
-    """Snake on a wrapped grid of CELL_SIZE-pixel cells, steered by the
+    """Snake on a walled grid of CELL_SIZE-pixel cells, steered by the
     encoder: each click turns the head 90 degrees (clockwise for
-    clockwise). The button restarts.
+    clockwise). Hitting a wall or yourself ends the game. The button
+    restarts.
     """
 
     frame_delay_seconds = 0.15
@@ -37,7 +38,6 @@ class SnakeGame(Game):
         # Head first. Starts heading right with two body cells trailing.
         self.snake = [(column - i, row) for i in range(3)]
         self.heading = 1
-        self._moved_heading = 1
         self.food = self._place_food()
         self.alive = True
         self._dead_frames = 0
@@ -63,20 +63,18 @@ class SnakeGame(Game):
                 self.reset()
             return
 
-        # Turning twice between frames could point straight back into the
-        # neck; ignore a heading that reverses the last move.
-        if (self.heading - self._moved_heading) % len(_HEADINGS) == 2:
-            self.heading = self._moved_heading
         dx, dy = _HEADINGS[self.heading]
         head_x, head_y = self.snake[0]
-        new_head = ((head_x + dx) % self.columns, (head_y + dy) % self.rows)
+        new_head = (head_x + dx, head_y + dy)
+        if not (0 <= new_head[0] < self.columns and 0 <= new_head[1] < self.rows):
+            self.alive = False
+            return
         eating = new_head == self.food
         # The tail cell is vacated this frame unless we're growing.
         body = self.snake if eating else self.snake[:-1]
         if new_head in body:
             self.alive = False
             return
-        self._moved_heading = self.heading
         self.snake.insert(0, new_head)
         if eating:
             self.food = self._place_food()
