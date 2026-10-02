@@ -41,8 +41,8 @@ animations.
 - **Boids** is a flock of 36 white boids steering around eight red obstacle
   pixels. The button scatters a new flock and new obstacles.
 - **Snake** is played on a walled 32x32 grid at a constant speed. Turning the knob turns the
-  snake's head 90 degrees per click; hitting a wall or yourself ends the game.
-  The button pauses (or restarts once you're dead).
+  snake's head 90 degrees per click; hitting a wall or yourself ends the game and shows your score
+  (foods eaten) until the button starts a new one. The button otherwise pauses.
 - **Breakout** aims the launch with the knob (a dotted line shows the heading) and the
   button fires; once the ball is in play, the knob slides the paddle 3 pixels
   per click against five rows of bricks and the button pauses. You get three lives (green dots, top-left) and a score of rows cleared beside them. Clearing a whole row drops the rows above it and adds a

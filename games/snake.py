@@ -3,6 +3,7 @@ import random
 import numpy as np
 
 from games.base import Game, draw_pause_icon
+from games.fonts import stamp_game_over
 
 # Grid steps as (dx, dy), in clockwise order so a +1 knob click is a right
 # turn: UP -> RIGHT -> DOWN -> LEFT.
@@ -12,15 +13,18 @@ _HEADINGS = ((0, -1), (1, 0), (0, 1), (-1, 0))
 class SnakeGame(Game):
     """Snake on a walled grid of CELL_SIZE-pixel cells, steered by the
     encoder: each click turns the head 90 degrees (clockwise for
-    clockwise). Hitting a wall or yourself ends the game. The button
-    pauses and resumes (or, once the snake is dead, restarts right away).
+    clockwise). Hitting a wall or yourself ends the game: the snake blinks
+    where it died, then GAME OVER and the number of foods eaten are held
+    until the button starts a new game. Otherwise the button pauses and
+    resumes.
     """
 
     frame_delay_seconds = 0.15
     menu_label = "SNAKE"
     CELL_SIZE = 2
+    START_LENGTH = 3
     # How many frames the dead snake blinks (in its own colors - red is
-    # reserved for signal, never failure) before a fresh game starts.
+    # reserved for signal, never failure) before the game-over screen.
     GAME_OVER_FRAMES = 12
 
     _BODY = (0, 200, 0)
@@ -36,7 +40,7 @@ class SnakeGame(Game):
     def reset(self) -> None:
         row, column = self.rows // 2, self.columns // 2
         # Head first. Starts heading right with two body cells trailing.
-        self.snake = [(column - i, row) for i in range(3)]
+        self.snake = [(column - i, row) for i in range(self.START_LENGTH)]
         self.heading = 1
         self.food = self._place_food()
         self.alive = True
@@ -67,9 +71,7 @@ class SnakeGame(Game):
         if self.paused:
             return
         if not self.alive:
-            self._dead_frames += 1
-            if self._dead_frames >= self.GAME_OVER_FRAMES:
-                self.reset()
+            self._dead_frames = min(self._dead_frames + 1, self.GAME_OVER_FRAMES)
             return
 
         dx, dy = _HEADINGS[self.heading]
@@ -94,6 +96,10 @@ class SnakeGame(Game):
 
     @property
     def frame(self) -> np.ndarray:
+        if not self.alive and self._dead_frames >= self.GAME_OVER_FRAMES:
+            frame = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+            stamp_game_over(frame, len(self.snake) - self.START_LENGTH)
+            return frame
         cells = np.zeros((self.rows, self.columns, 3), dtype=np.uint8)
         if self.food is not None:
             x, y = self.food

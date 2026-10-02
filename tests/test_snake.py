@@ -1,4 +1,7 @@
 import unittest
+from unittest.mock import patch
+
+from PIL import Image
 
 from games.snake import SnakeGame
 
@@ -48,15 +51,22 @@ class SnakeTests(unittest.TestCase):
         self.assertEqual(len(self.game.snake), 4)
         self.assertNotEqual(self.game.food, (x + 1, y))
 
-    def test_self_collision_ends_then_restarts(self) -> None:
+    def test_self_collision_ends_then_holds_game_over_until_button(self) -> None:
         self.game.snake = [(5, 5), (5, 6), (4, 6), (4, 5), (4, 4), (5, 4)]
         self.game.heading = 0
         self.game.cycle_view(-1)  # face left into (4, 5)
         self.game.advance()
         self.assertFalse(self.game.alive)
-        for _ in range(SnakeGame.GAME_OVER_FRAMES):
+        for _ in range(SnakeGame.GAME_OVER_FRAMES * 3):
             self.game.advance()
+        self.assertFalse(self.game.alive)  # held, not auto-restarted
+        with patch.object(Image.Image, "tobytes", side_effect=ImportError):
+            frame = self.game.frame
+        self.assertTrue(frame.any())
+        self.assertFalse(frame[0:8].any())  # a text screen, not the playfield
+        self.game.press_button()
         self.assertTrue(self.game.alive)
+        self.assertEqual(len(self.game.snake), SnakeGame.START_LENGTH)
 
     def test_button_pauses_and_resumes(self) -> None:
         head = self.game.snake[0]

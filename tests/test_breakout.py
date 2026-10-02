@@ -181,6 +181,31 @@ class BreakoutTests(unittest.TestCase):
         with patch.object(Image.Image, "tobytes", side_effect=ImportError):
             self.assertEqual(self.game.frame.shape, (64, 64, 3))
 
+    def test_losing_the_last_life_shows_game_over_until_button(self) -> None:
+        self.game.lives = 1
+        self.game.rows_cleared = 5
+        self.launch(0.0, 1.0)
+        self.game.ball_x, self.game.ball_y = 0.0, 63.0
+        self.game.paddle_x = 40
+        self.game.advance()
+        self.assertTrue(self.game.game_over)
+        self.assertEqual(self.game.lives, 0)
+        over = self.game.frame
+        self.assertEqual(over.shape, (64, 64, 3))
+        self.assertTrue(over.any())
+        # Frozen: ticks and the knob do nothing.
+        paddle = self.game.paddle_x
+        self.game.advance()
+        self.game.cycle_view(1)
+        self.assertEqual(self.game.paddle_x, paddle)
+        self.assertTrue(self.game.game_over)
+        # The button starts a fresh game, back to a waiting ball.
+        self.game.press_button()
+        self.assertFalse(self.game.game_over)
+        self.assertEqual(self.game.lives, BreakoutGame.LIVES)
+        self.assertEqual(self.game.rows_cleared, 0)
+        self.assertTrue(self.game.waiting_to_serve)
+
     def test_menu_label_fits_the_switcher(self) -> None:
         # unscii-8 at 8px/char plus 1px padding each side: 7 chars max.
         self.assertLessEqual(len(BreakoutGame.menu_label), 7)

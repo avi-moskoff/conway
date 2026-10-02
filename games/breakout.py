@@ -2,10 +2,9 @@ import math
 import random
 
 import numpy as np
-from PIL import Image, ImageDraw
 
 from games.base import Game, draw_pause_icon
-from games.fonts import draw_text, ticker_font
+from games.fonts import stamp_game_over, stamp_text
 
 
 class BreakoutGame(Game):
@@ -15,7 +14,9 @@ class BreakoutGame(Game):
     the paddle stays put. Once it's in play, the knob slides the paddle
     and the button pauses and resumes. Clearing a whole row drops the rows
     above it down one, keeping their colors, and the cleared row's color
-    becomes the fresh row on top, so the wall never runs out. Losing all lives restarts.
+    becomes the fresh row on top, so the wall never runs out. Losing the
+    last life shows GAME OVER and the score until the button starts a new
+    game.
     """
 
     frame_delay_seconds = 0.03
@@ -60,17 +61,19 @@ class BreakoutGame(Game):
         self.waiting_to_serve = False
         self.aim_degrees = 0
         self.paused = False
-        self._score_mask_cache: tuple[str, np.ndarray] = ("", np.zeros((8, 0), bool))
         self.reset()
 
     def press_button(self) -> None:
-        if self.waiting_to_serve:
+        if self.game_over:
+            self.reset()
+        elif self.waiting_to_serve:
             self._launch()
         else:
             self.paused = not self.paused
 
     def reset(self) -> None:
         self.paused = False
+        self.game_over = False
         self.rows_cleared = 0
         self.lives = self.LIVES
         self._deal_bricks()
@@ -111,7 +114,7 @@ class BreakoutGame(Game):
         self.ball_y = float(self.paddle_y - 1)
 
     def cycle_view(self, direction: int) -> None:
-        if self.paused:
+        if self.paused or self.game_over:
             return
         if self.waiting_to_serve:
             self.aim_degrees = min(
@@ -178,7 +181,7 @@ class BreakoutGame(Game):
         )
 
     def advance(self) -> None:
-        if self.waiting_to_serve or self.paused:
+        if self.waiting_to_serve or self.paused or self.game_over:
             return
 
         new_x = self.ball_x + self.vx
@@ -217,30 +220,23 @@ class BreakoutGame(Game):
         if self.ball_y >= self.height:
             self.lives -= 1
             if self.lives <= 0:
-                self.reset()
+                self.game_over = True
             else:
                 self._serve()
 
-    def _score_mask(self) -> np.ndarray:
-        """The score as an 8 x (4 digits) boolean mask, cached per value."""
-        text = str(self.rows_cleared % 10**self.SCORE_DIGITS)
-        if self._score_mask_cache[0] != text:
-            width = self.SCORE_DIGITS * 8
-            canvas = Image.new("1", (width, 8), 0)
-            draw_text(ImageDraw.Draw(canvas), (0, 0), text, ticker_font())
-            # Same idiom as games.menu / games.ticker: np.asarray on a
-            # 1-bit PIL image isn't reliable across Pillow versions.
-            pixels = np.asarray(list(canvas.get_flattened_data()), dtype=np.uint8)
-            self._score_mask_cache = (text, pixels.reshape(8, width).astype(bool))
-        return self._score_mask_cache[1]
-
     def _draw_score(self, frame: np.ndarray) -> None:
-        mask = self._score_mask()
-        region = frame[0:8, self.SCORE_X : self.SCORE_X + mask.shape[1]]
-        region[mask[:, : region.shape[1]]] = self._SCORE
+        text = str(self.rows_cleared % 10**self.SCORE_DIGITS)
+        stamp_text(frame, text, self.SCORE_X, 0, self._SCORE)
+
+    def _game_over_frame(self) -> np.ndarray:
+        frame = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+        stamp_game_over(frame, self.rows_cleared)
+        return frame
 
     @property
     def frame(self) -> np.ndarray:
+        if self.game_over:
+            return self._game_over_frame()
         frame = np.zeros((self.height, self.width, 3), dtype=np.uint8)
         for row, column in zip(*np.nonzero(self.bricks)):
             top = self.BRICK_TOP + row * self.BRICK_HEIGHT

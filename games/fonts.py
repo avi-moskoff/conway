@@ -15,7 +15,8 @@ rendered at its native size - any other size would blur or misalign it.
 
 from pathlib import Path
 
-from PIL import ImageDraw, ImageFont
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 
 _ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets" / "fonts"
 
@@ -100,3 +101,41 @@ def text_width(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFon
     """Width of `text` as draw_text will lay it out: characters times the
     single monospace advance."""
     return len(text) * glyph_advance(draw, font)
+
+
+_mask_cache: dict[str, np.ndarray] = {}
+
+
+def text_mask(text: str) -> np.ndarray:
+    """`text` rendered in the ticker font as an 8-row boolean mask, cached
+    per string - for screens that stamp text straight into an RGB frame.
+    """
+    cached = _mask_cache.get(text)
+    if cached is None:
+        width = len(text) * 8
+        canvas = Image.new("1", (width, 8), 0)
+        draw_text(ImageDraw.Draw(canvas), (0, 0), text, ticker_font())
+        # Same idiom as games.menu / games.ticker: np.asarray on a 1-bit
+        # PIL image goes through Image.tobytes(), which lazily imports
+        # PIL.ImageFile and fails once the matrix has dropped root.
+        pixels = np.asarray(list(canvas.get_flattened_data()), dtype=np.uint8)
+        cached = pixels.reshape(8, width).astype(bool)
+        _mask_cache[text] = cached
+    return cached
+
+
+def stamp_text(
+    frame: np.ndarray, text: str, x: int, y: int, color: tuple[int, int, int]
+) -> None:
+    """Draw `text` into an RGB frame in place, clipped to the frame."""
+    mask = text_mask(text)
+    region = frame[y : y + 8, x : x + mask.shape[1]]
+    region[mask[: region.shape[0], : region.shape[1]]] = color
+
+
+def stamp_game_over(frame: np.ndarray, score: int) -> None:
+    """The shared arcade game-over screen: GAME / OVER over the score,
+    centred, wrapping after four digits."""
+    width = frame.shape[1]
+    for text, y in (("GAME", 14), ("OVER", 24), (str(score % 10_000), 42)):
+        stamp_text(frame, text, (width - len(text) * 8) // 2, y, (255, 255, 255))
