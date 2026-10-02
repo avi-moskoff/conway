@@ -98,6 +98,21 @@ class BreakoutTests(unittest.TestCase):
         self.game.advance()
         self.assertEqual((self.game.vx, self.game.vy), (-1.0, -1.0))
 
+    def test_ball_can_fly_above_the_wall_and_is_drawn_over_the_score(self) -> None:
+        self.game.bricks[:] = False
+        self.game.bricks[4, 0] = True
+        self.launch(0.0, -1.0)
+        self.game.ball_x, self.game.ball_y = 14.0, 9.0
+        self.game.rows_cleared = 8
+        for _ in range(5):
+            self.game.advance()
+        self.assertLess(self.game.ball_y, BreakoutGame.BRICK_TOP)
+        frame = self.game.frame
+        self.assertEqual(
+            tuple(frame[int(self.game.ball_y), int(self.game.ball_x)]),
+            BreakoutGame._BALL,
+        )
+
     def test_paddle_bounces_ball_up(self) -> None:
         self.launch(0.0, 1.0)
         self.game.ball_x = self.game.paddle_x + 6.0
@@ -128,6 +143,15 @@ class BreakoutTests(unittest.TestCase):
         self.assertTrue(bricks[1].all())  # old row 0, dropped
         self.assertEqual(list(bricks[2].nonzero()[0]), [5])  # old row 1
         self.assertFalse(bricks[3].any())  # unchanged below the cleared row
+        self.assertEqual(self.game.rows_cleared, 1)
+
+    def test_score_is_drawn_and_resets_with_the_game(self) -> None:
+        blank = self.game.frame[0:8, 12:44].copy()
+        self.game.rows_cleared = 7
+        drawn = self.game.frame[0:8, 12:44]
+        self.assertTrue((drawn != blank).any())
+        self.game.reset()
+        self.assertEqual(self.game.rows_cleared, 0)
 
     def test_menu_label_fits_the_switcher(self) -> None:
         # unscii-8 at 8px/char plus 1px padding each side: 7 chars max.

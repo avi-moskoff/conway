@@ -2,8 +2,10 @@ import math
 import random
 
 import numpy as np
+from PIL import Image, ImageDraw
 
 from games.base import Game, draw_pause_icon
+from games.fonts import draw_text, ticker_font
 
 
 class BreakoutGame(Game):
@@ -27,6 +29,8 @@ class BreakoutGame(Game):
     PADDLE_STEP = 3
     PADDLE_ROW_OFFSET = 3  # rows up from the bottom edge
     LIVES = 3
+    SCORE_X = 12  # just right of the lives dots
+    SCORE_DIGITS = 4  # 8px each; more would reach the pause glyph
     AIM_STEP_DEGREES = 5
     AIM_LIMIT_DEGREES = 70
     AIM_INDICATOR_LENGTH = 6
@@ -46,6 +50,9 @@ class BreakoutGame(Game):
     _BALL = (0, 255, 255)
     _LIFE = (0, 255, 0)
     _AIM = (90, 90, 90)
+    # White. The ball can tunnel above the wall and fly through the score
+    # strip; it's drawn last, so it covers a digit pixel or two briefly.
+    _SCORE = (255, 255, 255)
 
     def __init__(self, height: int, width: int) -> None:
         super().__init__(height, width)
@@ -63,6 +70,7 @@ class BreakoutGame(Game):
 
     def reset(self) -> None:
         self.paused = False
+        self.rows_cleared = 0
         self.lives = self.LIVES
         self._deal_bricks()
         self._serve()
@@ -81,6 +89,7 @@ class BreakoutGame(Game):
         fresh full row appears on top. The wall's bottom edge never moves
         lower than where it started, so this can't crowd the paddle.
         """
+        self.rows_cleared += 1
         self.bricks[1 : cleared_row + 1] = self.bricks[:cleared_row].copy()
         self.bricks[0] = True
 
@@ -207,6 +216,14 @@ class BreakoutGame(Game):
             else:
                 self._serve()
 
+    def _draw_score(self, frame: np.ndarray) -> None:
+        text = str(self.rows_cleared % 10 ** self.SCORE_DIGITS)
+        canvas = Image.new("1", (self.SCORE_DIGITS * 8, 8), 0)
+        draw_text(ImageDraw.Draw(canvas), (0, 0), text, ticker_font())
+        mask = np.asarray(canvas, dtype=bool)
+        region = frame[0:8, self.SCORE_X : self.SCORE_X + mask.shape[1]]
+        region[mask[:, : region.shape[1]]] = self._SCORE
+
     @property
     def frame(self) -> np.ndarray:
         frame = np.zeros((self.height, self.width, 3), dtype=np.uint8)
@@ -223,7 +240,8 @@ class BreakoutGame(Game):
             self.paddle_x : self.paddle_x + self.PADDLE_WIDTH,
         ] = self._PADDLE
         for life in range(self.lives):
-            frame[1, 1 + life * 3] = self._LIFE
+            frame[3, 1 + life * 3] = self._LIFE
+        self._draw_score(frame)
         if self.waiting_to_serve:
             angle = math.radians(self.aim_degrees)
             for step in range(2, self.AIM_INDICATOR_LENGTH + 2):

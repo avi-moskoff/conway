@@ -45,7 +45,7 @@ animations.
   The button pauses (or restarts once you're dead).
 - **Breakout** aims the launch with the knob (a dotted line shows the heading) and the
   button fires; once the ball is in play, the knob slides the paddle 3 pixels
-  per click against five rows of bricks and the button pauses. You get three lives. Clearing a whole row drops the rows above it and adds a
+  per click against five rows of bricks and the button pauses. You get three lives (green dots, top-left) and a score of rows cleared beside them. Clearing a whole row drops the rows above it and adds a
   new one on top, so the wall never runs out.
 
 ### Live views
