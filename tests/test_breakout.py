@@ -59,6 +59,39 @@ class BreakoutTests(unittest.TestCase):
         self.assertEqual(int(self.game.bricks.sum()), 39)
         self.assertGreater(self.game.vy, 0)
 
+    def test_side_hit_flips_horizontal_not_vertical(self) -> None:
+        self.game.bricks[:] = False
+        self.game.bricks[4, 0] = True  # keeps the wall from re-dealing
+        self.game.bricks[1, 3] = True  # x 24..31, y 11..13
+        self.launch(1.0, 0.0)
+        self.game.ball_x, self.game.ball_y = 23.5, 12.0
+        self.game.advance()
+        self.assertFalse(self.game.bricks[1, 3])
+        self.assertEqual((self.game.vx, self.game.vy), (-1.0, 0.0))
+
+    def test_bottom_hit_flips_vertical_not_horizontal(self) -> None:
+        self.game.bricks[:] = False
+        self.game.bricks[0, 3] = True  # y 8..10
+        self.game.bricks[1, 3] = True
+        self.launch(0.3, -1.0)
+        self.game.ball_x, self.game.ball_y = 26.0, 14.0
+        for _ in range(8):
+            self.game.advance()
+            if not self.game.bricks[1, 3]:
+                break
+        self.assertFalse(self.game.bricks[1, 3])
+        self.assertGreater(self.game.vy, 0)
+        self.assertAlmostEqual(self.game.vx, 0.3)
+
+    def test_lone_corner_hit_flips_both(self) -> None:
+        self.game.bricks[:] = False
+        self.game.bricks[4, 0] = True  # keeps the wall from re-dealing
+        self.game.bricks[1, 3] = True
+        self.launch(1.0, 1.0)
+        self.game.ball_x, self.game.ball_y = 23.5, 10.5
+        self.game.advance()
+        self.assertEqual((self.game.vx, self.game.vy), (-1.0, -1.0))
+
     def test_paddle_bounces_ball_up(self) -> None:
         self.launch(0.0, 1.0)
         self.game.ball_x = self.game.paddle_x + 6.0

@@ -31,20 +31,18 @@ class BreakoutGame(Game):
     AIM_INDICATOR_LENGTH = 6
     BALL_SPEED = 1.0
 
-    # One hue (amber, as in the AQI colormap) with lightness stepping down
-    # the rows: the rows carry no meaning, so no categorical colors.
     _ROW_COLORS = (
-        (255, 176, 0),
-        (217, 150, 0),
-        (178, 123, 0),
-        (140, 97, 0),
-        (102, 70, 0),
+        (255, 0, 0),
+        (255, 128, 0),
+        (255, 255, 0),
+        (0, 255, 0),
+        (0, 128, 255),
     )
     _PADDLE = (255, 255, 255)
-    # Red is the design language's "look here first" signal - the ball is
-    # what you're watching. (It's a moving pixel, so subpixel fringing
-    # isn't a concern; the stationary life dots below are single-channel.)
-    _BALL = (255, 0, 0)
+    # Cyan, not red: the top brick row is red and would swallow the ball.
+    # (It's a fast-moving pixel, so subpixel fringing isn't a concern; the
+    # stationary life dots below are single-channel.)
+    _BALL = (0, 255, 255)
     _LIFE = (0, 255, 0)
     _AIM = (90, 90, 90)
 
@@ -113,6 +111,42 @@ class BreakoutGame(Game):
             return row, column
         return None
 
+    def _cell(self, x: float, y: float) -> tuple[int, int]:
+        """(column, row) in brick units; may fall outside the wall."""
+        return (
+            int(x) // self.BRICK_WIDTH,
+            (int(y) - self.BRICK_TOP) // self.BRICK_HEIGHT,
+        )
+
+    def _bounce_off(self, hit: tuple[int, int], new_x: float, new_y: float) -> None:
+        """Reverse whichever velocity component pushed the ball into `hit`.
+        Entering from the side flips vx, from above/below flips vy; a
+        diagonal entry flips the axis blocked by a neighbouring brick, or
+        both when the ball clipped a lone corner.
+        """
+        old_column, old_row = self._cell(self.ball_x, self.ball_y)
+        new_column, new_row = hit[1], hit[0]
+        crossed_x = new_column != old_column
+        crossed_y = new_row != old_row
+        if crossed_x and crossed_y:
+            side_blocked = self._brick_at_cell(new_row=old_row, column=new_column)
+            vertical_blocked = self._brick_at_cell(new_row=new_row, column=old_column)
+            flip_x = side_blocked or not vertical_blocked
+            flip_y = vertical_blocked or not side_blocked
+        else:
+            flip_x, flip_y = crossed_x, crossed_y
+        if flip_x:
+            self.vx = -self.vx
+        if flip_y:
+            self.vy = -self.vy
+
+    def _brick_at_cell(self, new_row: int, column: int) -> bool:
+        return (
+            0 <= new_row < self.BRICK_ROWS
+            and 0 <= column < self.BRICK_COLUMNS
+            and bool(self.bricks[new_row, column])
+        )
+
     def advance(self) -> None:
         if self.waiting_to_serve:
             return
@@ -143,13 +177,7 @@ class BreakoutGame(Game):
         hit = self._brick_at(new_x, new_y)
         if hit is not None:
             self.bricks[hit] = False
-            if self._brick_at(new_x, self.ball_y) is None and int(new_x) != int(
-                self.ball_x
-            ):
-                # Came in sideways through a brick's flank.
-                self.vx = -self.vx
-            else:
-                self.vy = -self.vy
+            self._bounce_off(hit, new_x, new_y)
             new_x, new_y = self.ball_x, self.ball_y
             if not self.bricks.any():
                 self._deal_bricks()
