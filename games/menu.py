@@ -15,10 +15,10 @@ from games.fonts import draw_text, ticker_font
 # row of its cell is only for descenders). Each row adds 1px of padding
 # above and below that, so the text never touches the edge of the
 # inverted highlight bar - and 1px on the left, for the same reason.
-# At most five screens exist today (three animations, two live views),
-# well within the seven rows that fit a 9px row height on a 64px-tall
-# display - so this class doesn't implement scrolling. If the roster ever
-# grows past that, this will need it.
+# At most seven screens exist today (five animations and games, two
+# live views), exactly the seven rows that fit a 9px row height on a
+# 64px-tall display - so this class doesn't implement scrolling. If the
+# roster ever grows past that, this will need it.
 CAP_HEIGHT = 7
 TEXT_PADDING = 1
 ROW_HEIGHT = CAP_HEIGHT + 2 * TEXT_PADDING

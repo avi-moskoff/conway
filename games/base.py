@@ -10,10 +10,10 @@ class Game(ABC):
 
     # The name shown for this screen in the switcher menu (see
     # games/menu.py). unscii-8 is monospace at 8px/char on a 64px-wide
-    # display, so this must be 8 characters or fewer to render without
-    # scrolling - the menu doesn't implement scrolling text, unlike the
-    # ticker. Every concrete screen overrides this; there's no sensible
-    # default.
+    # display with 1px of padding each side, so this must be 7 characters
+    # or fewer to render without scrolling - the menu doesn't implement
+    # scrolling text, unlike the ticker. Every concrete screen overrides
+    # this; there's no sensible default.
     menu_label = "?"
 
     def __init__(self, height: int, width: int) -> None:

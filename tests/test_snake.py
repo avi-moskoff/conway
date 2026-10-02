@@ -58,6 +58,9 @@ class SnakeTests(unittest.TestCase):
             self.game.advance()
         self.assertTrue(self.game.alive)
 
+    def test_menu_label_fits_the_switcher(self) -> None:
+        self.assertLessEqual(len(SnakeGame.menu_label), 7)
+
     def test_frame_shape(self) -> None:
         self.assertEqual(self.game.frame.shape, (64, 64, 3))
 

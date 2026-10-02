@@ -269,10 +269,10 @@ class SwitcherTests(unittest.TestCase):
 
 class BootScreenTests(unittest.TestCase):
     # With the environment cleared, the real default roster is exactly
-    # four games (GameOfLife, Langton, BoidsGame, SnakeGame) - flight/weather need
+    # five games (GameOfLife, Langton, BoidsGame, SnakeGame, BreakoutGame) - flight/weather need
     # CONWAY_HOME_LATITUDE/LONGITUDE, which are unset. See
     # runner.GameRunner._default_game_factories.
-    DEFAULT_ROSTER_SIZE = 4
+    DEFAULT_ROSTER_SIZE = 5
 
     def test_the_default_roster_boots_into_the_fully_progressed_conway_seed(
         self,

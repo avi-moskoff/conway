@@ -11,6 +11,7 @@ from config import FlightRadarConfig, WeatherRadarConfig
 from display import MatrixDisplay
 from games import (
     BoidsGame,
+    BreakoutGame,
     FlightRadarGame,
     Game,
     GameOfLife,
@@ -255,6 +256,7 @@ class GameRunner:
             lambda: Langton(self.HEIGHT, self.WIDTH),
             lambda: BoidsGame(self.HEIGHT, self.WIDTH),
             lambda: SnakeGame(self.HEIGHT, self.WIDTH),
+            lambda: BreakoutGame(self.HEIGHT, self.WIDTH),
         ]
         flight_config = FlightRadarConfig.from_environment()
         if flight_config is not None:

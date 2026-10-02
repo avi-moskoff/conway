@@ -29,7 +29,7 @@ off the button light.
 
 The switcher lists the screens in the order given here. The two live
 screens are added only when a home location is configured (see
-[Configuration](#configuration)); without one, the display runs just the four
+[Configuration](#configuration)); without one, the display runs just the five
 animations.
 
 ### Animations
@@ -43,6 +43,10 @@ animations.
 - **Snake** is played on a walled 32x32 grid at a constant speed. Turning the knob turns the
   snake's head 90 degrees per click; hitting a wall or yourself ends the game,
   and the button restarts.
+- **Breakout** aims the launch with the knob (a dotted line shows the heading) and the
+  button fires; once the ball is in play, the knob slides the paddle 3 pixels
+  per click against five rows of bricks and the button restarts the game. You get three lives; clearing the wall deals a new
+  one.
 
 ### Live views
 

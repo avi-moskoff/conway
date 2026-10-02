@@ -19,13 +19,13 @@ class SnakeGame(Game):
     frame_delay_seconds = 0.15
     menu_label = "SNAKE"
     CELL_SIZE = 2
-    # How many frames the dead snake flashes before a fresh game starts.
+    # How many frames the dead snake blinks (in its own colors - red is
+    # reserved for signal, never failure) before a fresh game starts.
     GAME_OVER_FRAMES = 12
 
     _BODY = (0, 200, 0)
     _HEAD = (0, 255, 255)
     _FOOD = (255, 0, 0)
-    _DEAD = (255, 0, 0)
 
     def __init__(self, height: int, width: int) -> None:
         super().__init__(height, width)
@@ -91,9 +91,8 @@ class SnakeGame(Game):
             cells[y, x] = self._FOOD
         flash_off = not self.alive and (self._dead_frames // 2) % 2 == 1
         if not flash_off:
-            body = self._BODY if self.alive else self._DEAD
             for x, y in self.snake[1:]:
-                cells[y, x] = body
+                cells[y, x] = self._BODY
             x, y = self.snake[0]
-            cells[y, x] = self._HEAD if self.alive else self._DEAD
+            cells[y, x] = self._HEAD
         return np.repeat(np.repeat(cells, self.CELL_SIZE, axis=0), self.CELL_SIZE, axis=1)
