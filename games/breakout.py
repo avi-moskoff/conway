@@ -14,8 +14,8 @@ class BreakoutGame(Game):
     waits, the knob aims the launch (an indicator shows the heading) and
     the paddle stays put. Once it's in play, the knob slides the paddle
     and the button pauses and resumes. Clearing a whole row drops the rows
-    above it down one and adds a fresh row on top, so the wall never runs
-    out. Losing all lives restarts.
+    above it down one, keeping their colors, and the cleared row's color
+    becomes the fresh row on top, so the wall never runs out. Losing all lives restarts.
     """
 
     frame_delay_seconds = 0.03
@@ -83,6 +83,7 @@ class BreakoutGame(Game):
         self.vy = -self.BALL_SPEED * math.cos(angle)
 
     def _deal_bricks(self) -> None:
+        self.row_colors = list(self._ROW_COLORS)
         self.bricks = np.ones((self.BRICK_ROWS, self.BRICK_COLUMNS), dtype=bool)
 
     def _drop_rows_above(self, cleared_row: int) -> None:
@@ -91,6 +92,9 @@ class BreakoutGame(Game):
         lower than where it started, so this can't crowd the paddle.
         """
         self.rows_cleared += 1
+        # Colors travel with their rows, so the cleared row's color is the
+        # one the fresh top row takes.
+        self.row_colors.insert(0, self.row_colors.pop(cleared_row))
         self.bricks[1 : cleared_row + 1] = self.bricks[:cleared_row].copy()
         self.bricks[0] = True
 
@@ -245,7 +249,7 @@ class BreakoutGame(Game):
             frame[
                 top : top + self.BRICK_HEIGHT - 1,
                 left : left + self.BRICK_WIDTH - 1,
-            ] = self._ROW_COLORS[row % len(self._ROW_COLORS)]
+            ] = self.row_colors[row]
         frame[
             self.paddle_y : self.paddle_y + 1,
             self.paddle_x : self.paddle_x + self.PADDLE_WIDTH,

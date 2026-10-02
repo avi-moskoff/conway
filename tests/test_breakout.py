@@ -147,6 +147,23 @@ class BreakoutTests(unittest.TestCase):
         self.assertEqual(list(bricks[2].nonzero()[0]), [5])  # old row 1
         self.assertFalse(bricks[3].any())  # unchanged below the cleared row
         self.assertEqual(self.game.rows_cleared, 1)
+        original = BreakoutGame._ROW_COLORS
+        self.assertEqual(
+            self.game.row_colors, [original[2], original[0], original[1], *original[3:]]
+        )
+
+    def test_colors_travel_with_rows_and_reset_with_the_game(self) -> None:
+        original = list(BreakoutGame._ROW_COLORS)
+        self.game.bricks[:] = False
+        self.game.bricks[4, 0] = True
+        self.game.bricks[0, 0] = True
+        self.launch(0.0, 1.0)
+        self.game.ball_x, self.game.ball_y = 4.0, float(8 + 4 * 3 - 1)
+        self.game.advance()
+        # Bottom (blue) row cleared: blue is now on top, others shifted down.
+        self.assertEqual(self.game.row_colors, [original[4], *original[:4]])
+        self.game.reset()
+        self.assertEqual(self.game.row_colors, original)
 
     def test_score_is_drawn_and_resets_with_the_game(self) -> None:
         blank = self.game.frame[0:8, 12:44].copy()
