@@ -15,6 +15,7 @@ from games import (
     Game,
     GameOfLife,
     Langton,
+    SnakeGame,
     WeatherRadarGame,
     boot_seed_frame,
 )
@@ -253,6 +254,7 @@ class GameRunner:
             lambda: GameOfLife(self.HEIGHT, self.WIDTH),
             lambda: Langton(self.HEIGHT, self.WIDTH),
             lambda: BoidsGame(self.HEIGHT, self.WIDTH),
+            lambda: SnakeGame(self.HEIGHT, self.WIDTH),
         ]
         flight_config = FlightRadarConfig.from_environment()
         if flight_config is not None:

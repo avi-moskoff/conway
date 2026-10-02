@@ -1,0 +1,54 @@
+import unittest
+
+from games.snake import SnakeGame
+
+
+class SnakeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.game = SnakeGame(64, 64)
+        self.game.food = (0, 0)
+
+    def test_moves_forward(self) -> None:
+        head = self.game.snake[0]
+        self.game.advance()
+        self.assertEqual(self.game.snake[0], (head[0] + 1, head[1]))
+        self.assertEqual(len(self.game.snake), 3)
+
+    def test_knob_turns_head_ninety_degrees(self) -> None:
+        head = self.game.snake[0]
+        self.game.cycle_view(1)
+        self.game.advance()
+        self.assertEqual(self.game.snake[0], (head[0], head[1] + 1))
+        self.game.cycle_view(-1)
+        self.game.advance()
+        self.assertEqual(self.game.snake[0][0], head[0] + 1)
+
+    def test_double_turn_cannot_reverse_into_neck(self) -> None:
+        self.game.cycle_view(1)
+        self.game.cycle_view(1)
+        self.game.advance()
+        self.assertTrue(self.game.alive)
+
+    def test_eating_grows_and_wraps(self) -> None:
+        x, y = self.game.snake[0]
+        self.game.food = (x + 1, y)
+        self.game.advance()
+        self.assertEqual(len(self.game.snake), 4)
+        self.assertNotEqual(self.game.food, (x + 1, y))
+
+    def test_self_collision_ends_then_restarts(self) -> None:
+        self.game.snake = [(5, 5), (5, 6), (4, 6), (4, 5), (4, 4), (5, 4)]
+        self.game.heading = self.game._moved_heading = 0
+        self.game.cycle_view(-1)  # face left into (4, 5)
+        self.game.advance()
+        self.assertFalse(self.game.alive)
+        for _ in range(SnakeGame.GAME_OVER_FRAMES):
+            self.game.advance()
+        self.assertTrue(self.game.alive)
+
+    def test_frame_shape(self) -> None:
+        self.assertEqual(self.game.frame.shape, (64, 64, 3))
+
+
+if __name__ == "__main__":
+    unittest.main()
